@@ -1,0 +1,27 @@
+{
+  "name": "whatsapp-bot",
+  "version": "2.0.0",
+  "description": "Tangle WhatsApp bot — Hebrew family-management assistant",
+  "main": "index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "seed": "node scripts/seed-demo-tasks.mjs"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "cors": "^2.8.6",
+    "dayjs": "^1.11.13",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "firebase-admin": "^12.7.0",
+    "pino": "^9.0.0",
+    "qrcode": "^1.5.4"
+  }
+}

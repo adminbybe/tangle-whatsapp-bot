@@ -1,0 +1,73 @@
+// Intent handler: query-schedule (read-only).
+// Returns a Hebrew bullet list of events in [today | tomorrow | this-week].
+
+import { db, Timestamp } from '../firebase-admin.js';
+import { dayjs, FAMILY_TZ, nowInTz, parseIsoToTz } from '../dates.js';
+import { scheduleReply } from '../reply-templates.js';
+
+const HEADER_BY_WINDOW = {
+  today: 'היום:',
+  tomorrow: 'מחר:',
+  'this-week': 'השבוע:',
+};
+
+function rangeFor(window) {
+  const now = nowInTz();
+  if (window === 'tomorrow') {
+    const start = now.add(1, 'day').startOf('day');
+    const end = start.add(1, 'day');
+    return { start, end };
+  }
+  if (window === 'this-week') {
+    // From now until end-of-Saturday in Israel (Sat = day 6).
+    const start = now;
+    const dow = now.day(); // 0=Sun ... 6=Sat
+    const daysUntilSat = (6 - dow + 7) % 7;
+    const end = now.add(daysUntilSat, 'day').endOf('day').add(1, 'millisecond');
+    return { start, end };
+  }
+  // default 'today'
+  const start = now.startOf('day');
+  const end = start.add(1, 'day');
+  return { start, end };
+}
+
+/**
+ * @param {object} args
+ * @param {{familyId: string}} args.sender
+ * @param {object} args.payload   { window: 'today'|'tomorrow'|'this-week' }
+ * @returns {Promise<{replyText: string}>}
+ */
+export async function querySchedule({ sender, payload }) {
+  const window = payload?.window && HEADER_BY_WINDOW[payload.window]
+    ? payload.window
+    : 'today';
+  const { start, end } = rangeFor(window);
+
+  const snap = await db
+    .collection('events')
+    .where('familyId', '==', sender.familyId)
+    .where('startTime', '>=', Timestamp.fromDate(start.toDate()))
+    .where('startTime', '<', Timestamp.fromDate(end.toDate()))
+    .orderBy('startTime', 'asc')
+    .get();
+
+  const lines = [];
+  for (const docSnap of snap.docs) {
+    const e = docSnap.data();
+    if (e.archivedAt) continue;
+    const startTs = e.startTime?.toDate ? e.startTime.toDate() : null;
+    if (!startTs) continue;
+    const local = dayjs(startTs).tz(FAMILY_TZ);
+    let prefix;
+    if (window === 'this-week') {
+      // Multi-day list: include day name + time
+      prefix = local.locale('he').format('dddd HH:mm');
+    } else {
+      prefix = local.format('HH:mm');
+    }
+    lines.push(`${prefix} ${e.title}`);
+  }
+
+  return { replyText: scheduleReply(HEADER_BY_WINDOW[window], lines) };
+}
