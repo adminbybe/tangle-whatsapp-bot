@@ -1,58 +1,54 @@
 // Persists Baileys WhatsApp session credentials in Firebase Realtime DB so the
-// bot can survive Render restarts without re-scanning the QR. Uses raw HTTP
-// fetch (Node 20+) — keeps compatibility with the original implementation.
+// bot can survive Render restarts without re-scanning the QR. Uses the Admin
+// SDK (authenticated) — anonymous HTTP gets Permission Denied on RTDB rules.
 
 import * as baileys from '@whiskeysockets/baileys';
 import pino from 'pino';
+import { rtdb } from './firebase-admin.js';
+
 const { initAuthCreds, BufferJSON, makeCacheableSignalKeyStore } = baileys;
 const silentLogger = pino({ level: 'silent' });
-import { REALTIME_DB_URL } from './firebase-admin.js';
-
-const FIREBASE_DB = REALTIME_DB_URL;
 
 async function fbGet(path) {
   try {
-    const res = await fetch(`${FIREBASE_DB}/${path}.json`);
-    return await res.json();
+    const snap = await rtdb.ref(path).once('value');
+    return snap.val();
   } catch (e) {
+    console.error('[auth-state] fbGet failed', path, e.message);
     return null;
   }
 }
 
 async function fbSet(path, data) {
   try {
-    await fetch(`${FIREBASE_DB}/${path}.json`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
+    await rtdb.ref(path).set(data);
   } catch (e) {
-    /* noop */
+    console.error('[auth-state] fbSet failed', path, e.message);
   }
 }
 
 async function fbDel(path) {
   try {
-    await fetch(`${FIREBASE_DB}/${path}.json`, { method: 'DELETE' });
+    await rtdb.ref(path).remove();
   } catch (e) {
-    /* noop */
+    console.error('[auth-state] fbDel failed', path, e.message);
   }
 }
 
 // Sanitize keys so they are valid Firebase Realtime DB paths (no .#$[])
 function sanitizeKey(key) {
-  return key.replace(/[.#$[\]]/g, '_');
+  return key.replace(/[.#$[\]/]/g, '_');
 }
 
 export async function useFirebaseAuthState() {
   async function readData(key) {
     const safe = sanitizeKey(key);
     const data = await fbGet(`tangleBotAuth/${safe}`);
-    if (!data) return null;
+    if (!data || typeof data !== 'string') return null;
     try {
       return JSON.parse(data, BufferJSON.reviver);
-    } catch (e) {
-      return data;
+    } catch {
+      return null;
     }
   }
 

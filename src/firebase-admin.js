@@ -41,8 +41,8 @@ export const db = admin.firestore();
 export const Timestamp = admin.firestore.Timestamp;
 export const FieldValue = admin.firestore.FieldValue;
 
-// The existing auth-state code uses raw HTTP fetch against Realtime DB so we
-// just expose the URL for it.
+// Realtime DB handle (used by useFirebaseAuthState for Baileys session).
+export const rtdb = admin.database();
 export const REALTIME_DB_URL = dbUrl;
 
 export default admin;
