@@ -1,11 +1,15 @@
 // Intent handler: add-event.
 // Mirrors createEvent() in app/src/lib/event-actions.ts exactly, with
 // source='bot'. Returns the new event id, the Hebrew reply, and an undo token.
+//
+// On incomplete payloads it does NOT throw. Instead it returns a structured
+// "needs-clarification" / "cannot-understand" status so the orchestrator can
+// produce a friendly Hebrew reply rather than a scary internal-error reply.
 
 import { db, FieldValue, Timestamp } from '../firebase-admin.js';
 import { dayjs, FAMILY_TZ, parseIsoToTz } from '../dates.js';
 import { newUndoToken } from '../undo.js';
-import { eventAddedReply } from '../reply-templates.js';
+import { eventAddedReply, clarifyTimeReply, unknownIntentReply } from '../reply-templates.js';
 
 const VALID_CATEGORIES = ['work', 'personal', 'school', 'family', 'medical', 'other'];
 
@@ -20,19 +24,49 @@ export class UnlinkedMemberError extends Error {
  * @param {object} args
  * @param {{familyId: string, memberId: string, linkedUserId: string|null, displayName: string}} args.sender
  * @param {object} args.payload
- * @returns {Promise<{eventId: string, replyText: string, undoToken: string, eventRef: any, eventTitle: string}>}
+ * @returns {Promise<
+ *   | {status: 'created', eventId: string, replyText: string, undoToken: string, eventRef: any, eventTitle: string}
+ *   | {status: 'needs-clarification', missing: 'startTime', title: string, replyText: string, partialPayload: object}
+ *   | {status: 'cannot-understand', reason: string, replyText: string}
+ * >}
  */
 export async function addEvent({ sender, payload }) {
   if (!payload || typeof payload !== 'object') {
-    throw new Error('add-event: missing payload');
+    return {
+      status: 'cannot-understand',
+      reason: 'missing-payload',
+      replyText: unknownIntentReply(),
+    };
   }
   const title = (payload.title || '').toString().trim();
-  if (!title) throw new Error('add-event: missing title');
+  if (!title) {
+    return {
+      status: 'cannot-understand',
+      reason: 'missing-title',
+      replyText: unknownIntentReply(),
+    };
+  }
 
   const startIso = payload.startTime;
-  if (!startIso) throw new Error('add-event: missing startTime');
+  if (!startIso) {
+    return {
+      status: 'needs-clarification',
+      missing: 'startTime',
+      title,
+      replyText: clarifyTimeReply(title),
+      partialPayload: { ...payload, title },
+    };
+  }
   const startD = dayjs(startIso);
-  if (!startD.isValid()) throw new Error('add-event: invalid startTime');
+  if (!startD.isValid()) {
+    return {
+      status: 'needs-clarification',
+      missing: 'startTime',
+      title,
+      replyText: clarifyTimeReply(title),
+      partialPayload: { ...payload, title, startTime: undefined },
+    };
+  }
 
   let endD;
   if (payload.endTime) {
@@ -86,6 +120,7 @@ export async function addEvent({ sender, payload }) {
   const undoToken = newUndoToken();
 
   return {
+    status: 'created',
     eventId: ref.id,
     eventRef: ref,
     eventTitle: title,

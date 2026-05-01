@@ -14,6 +14,11 @@ export function eventAddedReply(title, startDayjs) {
   return `הוספתי "${title}" ל${formatHebDate(startDayjs)}. לביטול שלח/י "בטל" תוך 30 שניות.`;
 }
 
+export function clarifyTimeReply(title) {
+  const safeTitle = title ? `"${title}"` : 'האירוע';
+  return `באיזו שעה ${safeTitle}? לדוגמה "ב-15:00".`;
+}
+
 export function eventCancelledReply() {
   return 'בוטל. האירוע הוסר מהיומן.';
 }

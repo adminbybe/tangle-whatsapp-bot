@@ -14,6 +14,12 @@ const FEW_SHOT_EXAMPLES = `
 הודעה: "תוסיפי פגישה עם דני מחר ב-14:00 במשרד"
 JSON: {"intent":"add-event","confidence":0.97,"payload":{"title":"פגישה עם דני","startTime":"2026-05-01T14:00:00+03:00","endTime":"2026-05-01T15:00:00+03:00","location":"במשרד","attendees":["דני"],"category":"work"}}
 
+הודעה: "תוסיף לי פגישה עם דני מחר ב-15:00"
+JSON: {"intent":"add-event","confidence":0.97,"payload":{"title":"פגישה עם דני","startTime":"2026-05-01T15:00:00+03:00","endTime":"2026-05-01T16:00:00+03:00","location":null,"attendees":["דני"],"category":"work"}}
+
+הודעה: "תוסיף לי פגישה עם דני מחר"
+JSON: {"intent":"add-event","confidence":0.6,"payload":{"title":"פגישה עם דני","location":null,"attendees":["דני"],"category":"work"}}
+
 הודעה: "יש לי משהו עם אמא בערב"
 JSON: {"intent":"add-event","confidence":0.55,"payload":{"title":"משהו עם אמא","startTime":"2026-04-30T19:00:00+03:00","endTime":"2026-04-30T20:00:00+03:00","location":null,"attendees":["אמא"],"category":"family"}}
 
@@ -34,10 +40,15 @@ function buildSystemPrompt(senderName, todayIsoDate) {
   return [
     `אתה עוזר משפחתי בעברית. נתח הודעה ממשתמש בשם ${senderName} שנשלחה היום (${todayIsoDate}, אזור זמן Asia/Jerusalem).`,
     'זהה את הכוונה ואת הביטחון שלך (0..1). השב רק JSON לפי הסכמה.',
-    'כללים:',
+    'כללים קריטיים:',
+    '- payload חייב להכיל אך ורק שדות של ה-intent שזיהית. אסור לערבב שדות בין intents.',
+    '  • intent="add-event" → רק title, startTime, endTime, location, attendees, category. אסור window/taskTitle/forDate.',
+    '  • intent="mark-task-done" → רק taskTitle, forDate. אסור title/startTime/window.',
+    '  • intent="query-schedule" → רק window. אסור title/startTime/taskTitle.',
+    '  • intent="unknown" → payload ריק {}.',
+    '- ל-add-event: title ו-startTime הם שדות חובה. אם המשתמש לא ציין שעה ברורה — השמט לגמרי את startTime (אל תמציא!), והורד את הביטחון מתחת ל-0.9.',
     '- כל ערכי startTime/endTime חייבים להיות ISO 8601 עם offset +03:00 או +02:00 לפי השעון בישראל.',
     '- אם המשתמש אמר "מחר" — חשב לפי todayIsoDate.',
-    '- אם לא ניתן לדעת בוודאות שעה — ניחוש סביר אבל הורד את הביטחון.',
     '- forDate תמיד YYYY-MM-DD.',
     '- אל תמציא שמות אנשים שלא הוזכרו.',
     '- אם ההודעה לא מתאימה לאף כוונה החזר intent="unknown".',

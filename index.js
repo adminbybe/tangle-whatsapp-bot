@@ -30,7 +30,9 @@ import {
   confirmationPrompt,
   eventCancelledReply,
   taskCancelledReply,
+  clarifyTimeReply,
 } from './src/reply-templates.js';
+import { dayjs, FAMILY_TZ } from './src/dates.js';
 
 const API_PORT = process.env.PORT || 3000;
 const CONFIDENCE_THRESHOLD = 0.9;
@@ -116,6 +118,27 @@ app.listen(API_PORT, () => {
 
 // ── Message handling ───────────────────────────────────────────────────────
 
+// Try to extract a time-of-day from a short user follow-up like "15:00",
+// "ב-15:00", "ב 15:00", "בשעה 15:00" — used when we previously asked the user
+// for a missing time. Returns "HH:mm" or null.
+function extractTimeOfDay(text) {
+  if (!text) return null;
+  const m = String(text).match(/(\d{1,2})[:.\s](\d{2})/);
+  if (!m) return null;
+  const hh = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if (isNaN(hh) || isNaN(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+// Build an ISO startTime in Asia/Jerusalem from a "tomorrow"/"today" hint and
+// an "HH:mm" string.
+function buildStartIso({ window, hhmm }) {
+  const base = window === 'tomorrow' ? dayjs().tz(FAMILY_TZ).add(1, 'day') : dayjs().tz(FAMILY_TZ);
+  const [hh, mm] = hhmm.split(':').map((n) => parseInt(n, 10));
+  return base.hour(hh).minute(mm).second(0).millisecond(0).format();
+}
+
 function intentSummaryHebrew(intent, payload) {
   if (intent === 'add-event') {
     return `נראה שאת מבקשת להוסיף אירוע: "${payload?.title || ''}".`;
@@ -133,6 +156,52 @@ async function executeIntent({ sender, intent, confidence, payload, rawText, fro
   if (intent === 'add-event') {
     try {
       const result = await addEvent({ sender, payload });
+
+      // Graceful path: the model produced a payload that's missing time info.
+      // Don't write the event; ask the user for the missing time.
+      if (result.status === 'needs-clarification') {
+        await logBotMessage({
+          sender,
+          fromPhone,
+          rawText,
+          intent,
+          confidence,
+          payload,
+          actionStatus: 'pending-confirmation',
+          resultingEntityType: null,
+          resultingEntityId: null,
+          botReply: result.replyText,
+          undoExpiresAt: null,
+        });
+        return {
+          replyText: result.replyText,
+          clarification: {
+            kind: 'add-event-needs-time',
+            title: result.title,
+            partialPayload: result.partialPayload,
+            originalRawText: rawText,
+          },
+        };
+      }
+
+      // Graceful path: payload was unrecognizable (missing title, etc.).
+      if (result.status === 'cannot-understand') {
+        await logBotMessage({
+          sender,
+          fromPhone,
+          rawText,
+          intent,
+          confidence,
+          payload,
+          actionStatus: 'rejected',
+          resultingEntityType: null,
+          resultingEntityId: null,
+          botReply: result.replyText,
+          undoExpiresAt: null,
+        });
+        return { replyText: result.replyText };
+      }
+
       const undoExpiresAt = new Date(Date.now() + UNDO_TTL_MS);
       const botMessageId = await logBotMessage({
         sender,
@@ -333,10 +402,49 @@ async function handleIncomingMessage(msg) {
   // Pending confirmation reply
   const pending = pendingByPhone.get(fromPhone);
   if (pending && pending.expiresAt >= Date.now()) {
+    // Special case: previous reply was a clarify-time prompt for an add-event.
+    // If the user now sends just a time, merge it and re-attempt.
+    if (pending.kind === 'add-event-needs-time') {
+      const hhmm = extractTimeOfDay(rawText);
+      if (hhmm) {
+        pendingByPhone.delete(fromPhone);
+        const partial = pending.partialPayload || {};
+        // Default window is "tomorrow" since most follow-ups in this flow
+        // come from messages like "פגישה עם דני מחר". The original window is
+        // not always present on the partial payload, so pass it through if
+        // we stashed one.
+        const startIso = buildStartIso({
+          window: pending.window || 'tomorrow',
+          hhmm,
+        });
+        const fullPayload = { ...partial, startTime: startIso };
+        try {
+          const { replyText } = await executeIntent({
+            sender,
+            intent: 'add-event',
+            confidence: pending.confidence ?? 0.95,
+            payload: fullPayload,
+            rawText: pending.originalRawText
+              ? `${pending.originalRawText} | ${rawText}`
+              : rawText,
+            fromPhone,
+          });
+          await sock.sendMessage(remoteJid, { text: replyText });
+        } catch (err) {
+          console.error('[bot] clarify-followup failed:', err.message);
+          await sock.sendMessage(remoteJid, { text: internalErrorReply() });
+        }
+        return;
+      }
+      // No time found in this message → drop the pending clarify and treat
+      // the message as a fresh request.
+      pendingByPhone.delete(fromPhone);
+    }
+
     if (/^כן\.?$/.test(rawText)) {
       pendingByPhone.delete(fromPhone);
       try {
-        const { replyText } = await executeIntent({
+        const { replyText, clarification } = await executeIntent({
           sender,
           intent: pending.intent,
           confidence: pending.confidence,
@@ -344,6 +452,16 @@ async function handleIncomingMessage(msg) {
           rawText: pending.rawText,
           fromPhone,
         });
+        if (clarification && clarification.kind === 'add-event-needs-time') {
+          setPending(fromPhone, {
+            kind: 'add-event-needs-time',
+            intent: 'add-event',
+            confidence: pending.confidence,
+            partialPayload: clarification.partialPayload,
+            window: pending.payload?.window || 'tomorrow',
+            originalRawText: clarification.originalRawText,
+          });
+        }
         await sock.sendMessage(remoteJid, { text: replyText });
       } catch (err) {
         console.error('[bot] confirm-execute failed:', err.message);
@@ -421,7 +539,7 @@ async function handleIncomingMessage(msg) {
 
   if (parsed.confidence >= CONFIDENCE_THRESHOLD) {
     try {
-      const { replyText } = await executeIntent({
+      const { replyText, clarification } = await executeIntent({
         sender,
         intent: parsed.intent,
         confidence: parsed.confidence,
@@ -429,6 +547,17 @@ async function handleIncomingMessage(msg) {
         rawText,
         fromPhone,
       });
+      if (clarification && clarification.kind === 'add-event-needs-time') {
+        // Save partial intent so the next message (a time) can complete it.
+        setPending(fromPhone, {
+          kind: 'add-event-needs-time',
+          intent: 'add-event',
+          confidence: parsed.confidence,
+          partialPayload: clarification.partialPayload,
+          window: parsed.payload?.window || 'tomorrow',
+          originalRawText: clarification.originalRawText,
+        });
+      }
       await sock.sendMessage(remoteJid, { text: replyText });
     } catch (err) {
       console.error('[bot] execute failed:', err.message, err.stack);
