@@ -45,8 +45,9 @@ function buildSystemPrompt(senderName, todayIsoDate) {
   ].join('\n');
 }
 
-function unknownResult() {
-  return { intent: 'unknown', confidence: 0, payload: {} };
+function unknownResult(reason) {
+  const payload = reason ? { _debug: reason } : {};
+  return { intent: 'unknown', confidence: 0, payload };
 }
 
 function withTimeout(promise, ms) {
@@ -102,7 +103,7 @@ export async function parseMessage(rawText, senderName, todayIsoDate) {
     });
   } catch (err) {
     console.error('[nlu] failed to construct model:', err.message);
-    return unknownResult();
+    return unknownResult('model-construct: ' + err.message);
   }
 
   try {
@@ -113,7 +114,8 @@ export async function parseMessage(rawText, senderName, todayIsoDate) {
       TIMEOUT_MS
     );
     const text = result?.response?.text?.();
-    if (!text) return unknownResult();
+    console.log('[nlu] Gemini response text:', text?.slice(0, 500));
+    if (!text) return unknownResult('empty-response');
     const parsed = JSON.parse(text);
     if (
       !parsed ||
@@ -123,11 +125,11 @@ export async function parseMessage(rawText, senderName, todayIsoDate) {
       typeof parsed.payload !== 'object' ||
       parsed.payload === null
     ) {
-      return unknownResult();
+      return unknownResult('schema-mismatch: ' + JSON.stringify(parsed).slice(0, 200));
     }
     const allowed = ['add-event', 'mark-task-done', 'query-schedule', 'unknown'];
     if (!allowed.includes(parsed.intent)) {
-      return unknownResult();
+      return unknownResult('bad-intent: ' + parsed.intent);
     }
     return {
       intent: parsed.intent,
@@ -135,7 +137,7 @@ export async function parseMessage(rawText, senderName, todayIsoDate) {
       payload: parsed.payload,
     };
   } catch (err) {
-    console.error('[nlu] Gemini parse failed:', err.message);
-    return unknownResult();
+    console.error('[nlu] Gemini parse failed:', err.message, err.stack);
+    return unknownResult('exception: ' + err.message);
   }
 }
