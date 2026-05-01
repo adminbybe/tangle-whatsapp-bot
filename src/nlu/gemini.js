@@ -6,7 +6,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NLU_RESPONSE_SCHEMA } from './schema.js';
 
 const TIMEOUT_MS = 10_000;
-const MODEL_NAME = 'gemini-2.0-flash';
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
 
 const FEW_SHOT_EXAMPLES = `
 דוגמאות (today=2026-04-30, יום חמישי):
