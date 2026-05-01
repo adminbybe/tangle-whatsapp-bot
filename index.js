@@ -698,17 +698,26 @@ async function startBot() {
       }
     });
 
+    // Wrap sendMessage so EVERY message the bot sends is cached for getMessage()
+    // and recognized by the loop-guard in handleIncomingMessage. Wrapping at the
+    // sendMessage boundary (instead of caching all fromMe events) ensures we
+    // only cache OUR outgoing replies, not the user's Note-to-self messages.
+    const _origSendMessage = sock.sendMessage.bind(sock);
+    sock.sendMessage = async (jid, content, options) => {
+      const result = await _origSendMessage(jid, content, options);
+      if (result?.key?.id) {
+        cacheOutgoing(result.key, result);
+      }
+      return result;
+    };
+
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       console.log('[bot:upsert]', { type, count: messages?.length });
-      // Always cache outgoing messages from this device so getMessage() can
-      // serve retry-receipts (fixes "Waiting for this message" on mobile).
-      for (const m of messages || []) {
-        if (m?.key?.fromMe && m.message) cacheOutgoing(m.key, m);
-      }
-      // 'notify' = real-time message; 'append' = sent from another linked device
-      // (e.g. user typing on phone while bot is the linked device). We need both
-      // for Note-to-self testing where the user only has the phone.
-      if (type !== 'notify' && type !== 'append') return;
+      // Only handle 'notify' (real-time fresh messages). 'append' includes
+      // messages we ourselves sent and would loop. Note-to-self from mobile
+      // requires the user to have WhatsApp Desktop open as well; the linked-
+      // device protocol routes only notify events to us.
+      if (type !== 'notify') return;
       for (const msg of messages) {
         try {
           await handleIncomingMessage(msg);
