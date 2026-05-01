@@ -616,6 +616,19 @@ async function handleIncomingMessage(msg) {
 
 // ── Boot Baileys ───────────────────────────────────────────────────────────
 
+// In-memory cache of recent outgoing messages. Used by getMessage() so Baileys
+// can answer WhatsApp's retry-receipts when the primary device fails to
+// decrypt — the canonical fix for "Waiting for this message" on mobile.
+const sentMessageCache = new Map();
+function cacheOutgoing(key, msg) {
+  if (!key?.id || !msg) return;
+  sentMessageCache.set(`${key.remoteJid}|${key.id}`, msg);
+  if (sentMessageCache.size > 500) {
+    const oldest = sentMessageCache.keys().next().value;
+    sentMessageCache.delete(oldest);
+  }
+}
+
 async function startBot() {
   console.log('מפעיל בוט...');
   try {
@@ -631,6 +644,12 @@ async function startBot() {
       browser: ['Tangle', 'Chrome', '4.0.0'],
       keepAliveIntervalMs: 30_000,
       connectTimeoutMs: 60_000,
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      getMessage: async (key) => {
+        const hit = sentMessageCache.get(`${key.remoteJid}|${key.id}`);
+        return hit?.message || { conversation: '' };
+      },
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -673,6 +692,11 @@ async function startBot() {
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       console.log('[bot:upsert]', { type, count: messages?.length });
+      // Always cache outgoing messages from this device so getMessage() can
+      // serve retry-receipts (fixes "Waiting for this message" on mobile).
+      for (const m of messages || []) {
+        if (m?.key?.fromMe && m.message) cacheOutgoing(m.key, m);
+      }
       // 'notify' = real-time message; 'append' = sent from another linked device
       // (e.g. user typing on phone while bot is the linked device). We need both
       // for Note-to-self testing where the user only has the phone.
