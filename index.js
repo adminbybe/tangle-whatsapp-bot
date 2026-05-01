@@ -673,7 +673,10 @@ async function startBot() {
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       console.log('[bot:upsert]', { type, count: messages?.length });
-      if (type !== 'notify') return;
+      // 'notify' = real-time message; 'append' = sent from another linked device
+      // (e.g. user typing on phone while bot is the linked device). We need both
+      // for Note-to-self testing where the user only has the phone.
+      if (type !== 'notify' && type !== 'append') return;
       for (const msg of messages) {
         try {
           await handleIncomingMessage(msg);
