@@ -7,7 +7,8 @@ import 'dotenv/config';
 import * as baileysModule from '@whiskeysockets/baileys';
 const baileys = baileysModule.default || baileysModule;
 const makeWASocket = baileys.default || baileys.makeWASocket || baileys;
-const { DisconnectReason } = baileys;
+// Hardcoded: DisconnectReason.loggedOut === 401 in Baileys 6.x
+const DISCONNECT_LOGGED_OUT = 401;
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -512,7 +513,7 @@ async function startBot() {
           lastDisconnect?.error instanceof Boom
             ? lastDisconnect.error.output?.statusCode
             : 0;
-        const shouldReconnect = code !== DisconnectReason.loggedOut;
+        const shouldReconnect = code !== DISCONNECT_LOGGED_OUT;
         console.log('התנתק, קוד:', code, '— מחבר מחדש:', shouldReconnect);
         if (shouldReconnect) {
           setTimeout(startBot, 5000);
