@@ -262,9 +262,18 @@ async function executeIntent({ sender, intent, confidence, payload, rawText, fro
 }
 
 async function handleIncomingMessage(msg) {
-  if (!msg || msg.key?.fromMe) return;
+  if (!msg) return;
   const remoteJid = msg.key?.remoteJid;
   if (!remoteJid || remoteJid.endsWith('@g.us')) return;
+
+  // Allow "Note to self" — when the user messages their own number, the chat
+  // sends fromMe=true with remoteJid === own JID. Reject other fromMe messages
+  // (we don't want to react to outgoing chats with other people).
+  if (msg.key?.fromMe) {
+    const ownJid = sock?.user?.id?.split(':')[0]?.split('@')[0];
+    const ownJidFull = ownJid ? `${ownJid}@s.whatsapp.net` : null;
+    if (!ownJidFull || remoteJid !== ownJidFull) return;
+  }
 
   const rawText = (
     msg.message?.conversation ||
