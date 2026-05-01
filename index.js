@@ -264,14 +264,22 @@ async function executeIntent({ sender, intent, confidence, payload, rawText, fro
 async function handleIncomingMessage(msg) {
   if (!msg) return;
   const remoteJid = msg.key?.remoteJid;
-  if (!remoteJid || remoteJid.endsWith('@g.us')) return;
+  const fromMe = msg.key?.fromMe;
+  const ownJidRaw = sock?.user?.id;
+  console.log('[bot:incoming]', JSON.stringify({ remoteJid, fromMe, ownJidRaw, hasMsg: !!msg.message }));
+
+  if (!remoteJid || remoteJid.endsWith('@g.us')) {
+    console.log('[bot:skip] no remoteJid or group');
+    return;
+  }
 
   // Allow "Note to self" — when the user messages their own number, the chat
   // sends fromMe=true with remoteJid === own JID. Reject other fromMe messages
   // (we don't want to react to outgoing chats with other people).
-  if (msg.key?.fromMe) {
-    const ownJid = sock?.user?.id?.split(':')[0]?.split('@')[0];
+  if (fromMe) {
+    const ownJid = ownJidRaw?.split(':')[0]?.split('@')[0];
     const ownJidFull = ownJid ? `${ownJid}@s.whatsapp.net` : null;
+    console.log('[bot:fromMe]', { ownJidFull, matches: remoteJid === ownJidFull });
     if (!ownJidFull || remoteJid !== ownJidFull) return;
   }
 
@@ -535,6 +543,7 @@ async function startBot() {
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      console.log('[bot:upsert]', { type, count: messages?.length });
       if (type !== 'notify') return;
       for (const msg of messages) {
         try {
