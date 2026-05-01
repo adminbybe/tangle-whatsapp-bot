@@ -342,6 +342,14 @@ async function handleIncomingMessage(msg) {
     return;
   }
 
+  // CRITICAL: ignore messages we ourselves sent (the bot's own replies).
+  // Without this, replying in a Note-to-self chat triggers an infinite loop
+  // because the bot's reply re-enters messages.upsert as fromMe=true.
+  if (fromMe && msg.key?.id && sentMessageCache.has(`${remoteJid}|${msg.key.id}`)) {
+    console.log('[bot:skip] own outgoing reply');
+    return;
+  }
+
   // Allow "Note to self" — when the user messages their own number, the chat
   // sends fromMe=true with remoteJid === own JID. Reject other fromMe messages
   // (we don't want to react to outgoing chats with other people).
