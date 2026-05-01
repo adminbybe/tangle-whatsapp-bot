@@ -3,7 +3,9 @@
 // fetch (Node 20+) — keeps compatibility with the original implementation.
 
 import * as baileys from '@whiskeysockets/baileys';
-const { initAuthCreds, BufferJSON } = baileys;
+import pino from 'pino';
+const { initAuthCreds, BufferJSON, makeCacheableSignalKeyStore } = baileys;
+const silentLogger = pino({ level: 'silent' });
 import { REALTIME_DB_URL } from './firebase-admin.js';
 
 const FIREBASE_DB = REALTIME_DB_URL;
@@ -66,29 +68,31 @@ export async function useFirebaseAuthState() {
 
   const creds = (await readData('creds')) || initAuthCreds();
 
-  const state = {
-    creds,
-    keys: {
-      get: async (type, ids) => {
-        const data = {};
-        for (const id of ids) {
-          const val = await readData(`keys_${type}_${id}`);
-          if (val) data[id] = val;
-        }
-        return data;
-      },
-      set: async (data) => {
-        for (const [type, typeData] of Object.entries(data)) {
-          for (const [id, val] of Object.entries(typeData || {})) {
-            if (val) {
-              await writeData(`keys_${type}_${id}`, val);
-            } else {
-              await removeData(`keys_${type}_${id}`);
-            }
+  const rawKeys = {
+    get: async (type, ids) => {
+      const data = {};
+      for (const id of ids) {
+        const val = await readData(`keys_${type}_${id}`);
+        if (val) data[id] = val;
+      }
+      return data;
+    },
+    set: async (data) => {
+      for (const [type, typeData] of Object.entries(data)) {
+        for (const [id, val] of Object.entries(typeData || {})) {
+          if (val) {
+            await writeData(`keys_${type}_${id}`, val);
+          } else {
+            await removeData(`keys_${type}_${id}`);
           }
         }
-      },
+      }
     },
+  };
+
+  const state = {
+    creds,
+    keys: makeCacheableSignalKeyStore(rawKeys, silentLogger),
   };
 
   const saveCreds = async () => {
