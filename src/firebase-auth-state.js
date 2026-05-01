@@ -2,7 +2,8 @@
 // bot can survive Render restarts without re-scanning the QR. Uses raw HTTP
 // fetch (Node 20+) — keeps compatibility with the original implementation.
 
-import { initAuthCreds, BufferJSON } from '@whiskeysockets/baileys';
+import * as baileys from '@whiskeysockets/baileys';
+const { initAuthCreds, BufferJSON } = baileys;
 import { REALTIME_DB_URL } from './firebase-admin.js';
 
 const FIREBASE_DB = REALTIME_DB_URL;
