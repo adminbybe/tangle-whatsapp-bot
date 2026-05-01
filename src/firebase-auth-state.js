@@ -45,7 +45,7 @@ function sanitizeKey(key) {
 export async function useFirebaseAuthState() {
   async function readData(key) {
     const safe = sanitizeKey(key);
-    const data = await fbGet(`botAuth/${safe}`);
+    const data = await fbGet(`tangleBotAuth/${safe}`);
     if (!data) return null;
     try {
       return JSON.parse(data, BufferJSON.reviver);
@@ -56,12 +56,12 @@ export async function useFirebaseAuthState() {
 
   async function writeData(key, value) {
     const safe = sanitizeKey(key);
-    await fbSet(`botAuth/${safe}`, JSON.stringify(value, BufferJSON.replacer));
+    await fbSet(`tangleBotAuth/${safe}`, JSON.stringify(value, BufferJSON.replacer));
   }
 
   async function removeData(key) {
     const safe = sanitizeKey(key);
-    await fbDel(`botAuth/${safe}`);
+    await fbDel(`tangleBotAuth/${safe}`);
   }
 
   const creds = (await readData('creds')) || initAuthCreds();
@@ -99,5 +99,5 @@ export async function useFirebaseAuthState() {
 }
 
 export async function clearAuthState() {
-  await fbDel('botAuth');
+  await fbDel('tangleBotAuth');
 }
