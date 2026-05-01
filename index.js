@@ -4,8 +4,10 @@
 
 import 'dotenv/config';
 
-import baileys from '@whiskeysockets/baileys';
-const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion } = baileys;
+import * as baileysModule from '@whiskeysockets/baileys';
+const baileys = baileysModule.default || baileysModule;
+const makeWASocket = baileys.default || baileys.makeWASocket || baileys;
+const { DisconnectReason, fetchLatestBaileysVersion } = baileys;
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import QRCode from 'qrcode';
