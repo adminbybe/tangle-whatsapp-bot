@@ -7,7 +7,7 @@ import 'dotenv/config';
 import * as baileysModule from '@whiskeysockets/baileys';
 const baileys = baileysModule.default || baileysModule;
 const makeWASocket = baileys.default || baileys.makeWASocket || baileys;
-const { DisconnectReason, fetchLatestBaileysVersion } = baileys;
+const { DisconnectReason } = baileys;
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -477,11 +477,8 @@ async function startBot() {
   try {
     const { state, saveCreds } = await useFirebaseAuthState();
     console.log('Firebase auth loaded');
-    const { version } = await fetchLatestBaileysVersion();
-    console.log('Baileys version:', version);
 
     sock = makeWASocket({
-      version,
       auth: state,
       logger: pino({ level: 'warn' }),
       browser: ['Tangle', 'Chrome', '4.0.0'],
