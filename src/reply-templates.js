@@ -53,6 +53,11 @@ export function internalErrorReply() {
   return 'משהו השתבש אצלי. נסי שוב בעוד רגע.';
 }
 
+export function greetingFor(displayName) {
+  const safeName = displayName ? ` ${displayName}` : '';
+  return `כן${safeName}, איך אפשר לעזור?`;
+}
+
 /**
  * @param {string} headerHebrew  e.g. "היום:" / "מחר:" / "השבוע:"
  * @param {string[]} lines       e.g. ["09:00 פגישה עם דני", "14:00 רופא"]

@@ -22,6 +22,7 @@ import { markTaskDone } from './src/intents/mark-task-done.js';
 import { querySchedule } from './src/intents/query-schedule.js';
 import { logBotMessage, updateBotMessageStatus } from './src/bot-message-log.js';
 import { undoManager } from './src/undo.js';
+import { parseTrigger, isAwake, setAwake } from './src/trigger.js';
 import {
   unrecognizedSenderReply,
   unlinkedMemberReply,
@@ -31,6 +32,7 @@ import {
   eventCancelledReply,
   taskCancelledReply,
   clarifyTimeReply,
+  greetingFor,
 } from './src/reply-templates.js';
 import { dayjs, FAMILY_TZ } from './src/dates.js';
 
@@ -410,6 +412,9 @@ async function handleIncomingMessage(msg) {
   // Pending confirmation reply
   const pending = pendingByPhone.get(fromPhone);
   if (pending && pending.expiresAt >= Date.now()) {
+    // User is mid-conversation — keep the awake window alive so a follow-up
+    // after the pending resolves doesn't require re-saying the trigger.
+    setAwake(fromPhone);
     // Special case: previous reply was a clarify-time prompt for an add-event.
     // If the user now sends just a time, merge it and re-attempt.
     if (pending.kind === 'add-event-needs-time') {
@@ -493,10 +498,30 @@ async function handleIncomingMessage(msg) {
     pendingByPhone.delete(fromPhone);
   }
 
+  // Trigger-word gate: stay silent unless the bot was addressed by name
+  // or this sender is in an active "awake" window from a recent call.
+  const trig = parseTrigger(rawText);
+  const awake = isAwake(fromPhone);
+  if (!trig.matched && !awake) {
+    console.log('[bot:silent] no trigger, not awake', { fromPhone });
+    return;
+  }
+  let textToProcess = rawText;
+  if (trig.matched) {
+    if (trig.residual === '') {
+      // Bare call ("ג'רוויס" alone) — greet and arm the awake window.
+      setAwake(fromPhone);
+      await sock.sendMessage(remoteJid, { text: greetingFor(sender.displayName) });
+      return;
+    }
+    textToProcess = trig.residual;
+  }
+  setAwake(fromPhone);
+
   // Standard NLU path
   let parsed;
   try {
-    parsed = await parseMessage(rawText, sender.displayName, todayIsoDate());
+    parsed = await parseMessage(textToProcess, sender.displayName, todayIsoDate());
   } catch (err) {
     console.error('[bot] parseMessage threw:', err.message);
     parsed = { intent: 'unknown', confidence: 0, payload: {} };
