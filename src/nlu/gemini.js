@@ -66,6 +66,15 @@ JSON: {"intent":"query-file-expiry","confidence":0.93,"payload":{"searchQuery":"
 הודעה: "כמה זמן יש לי על הרישיון?"
 JSON: {"intent":"query-file-expiry","confidence":0.9,"payload":{"searchQuery":"רישיון"}}
 
+הודעה: "מתי הדרכון של אבא נגמר?"
+JSON: {"intent":"query-file-expiry","confidence":0.95,"payload":{"searchQuery":"דרכון אבא"}}
+
+הודעה: "כמה זמן עוד יש לחוזה השכירות?"
+JSON: {"intent":"query-file-expiry","confidence":0.9,"payload":{"searchQuery":"חוזה שכירות"}}
+
+הודעה: "עד מתי תקף הביטוח של הבית?"
+JSON: {"intent":"query-file-expiry","confidence":0.92,"payload":{"searchQuery":"ביטוח בית"}}
+
 הודעה: "אהלן מה קורה"
 JSON: {"intent":"unknown","confidence":0.1,"payload":{}}
 `;
@@ -85,7 +94,8 @@ function buildSystemPrompt(senderName, todayIsoDate) {
     '- ל-add-event: title ו-startTime הם שדות חובה. אם המשתמש לא ציין שעה ברורה — השמט לגמרי את startTime (אל תמציא!), והורד את הביטחון מתחת ל-0.9.',
     '- כל ערכי startTime/endTime חייבים להיות ISO 8601 עם offset +03:00 או +02:00 לפי השעון בישראל.',
     '- ב-query-schedule: window="this-week" כשהמשתמש שואל על השבוע הנוכחי. window="next-week" כשהוא שואל "השבוע הבא", "בשבוע הבא", או "הלו"ז השבועי החל ממחר". window="this-month" כשהוא שואל "מה יש לי החודש", "החודש הזה", "החודש הקרוב". window="next-month" כשהוא שואל "החודש הבא". אם today הוא יום שבת והמשתמש אומר "השבוע" סתם, נטה ל-this-week (הקוד יטפל בזה הגיוני).',
-    '- חשוב מאוד: אם השאלה לא מתאימה בדיוק לאחד מה-intents הקיימים (לדוגמה שאלה על אנשים, פרטי קשר, מסמכים שלא ברור אם הם תוקפים, או נושא לא מוכר) — החזר intent="unknown" עם confidence נמוך. אסור לכפות התאמה לכוונה הקרובה ביותר רק כי היא קיימת.',
+    '- ב-query-file-expiry: כל שאלה בנוסח "מתי X פג / נגמר / עד מתי תקף / כמה זמן יש על X" על מסמך, רישיון, ביטוח, טסט רכב, חיסון, דרכון, חוזה, או כל פריט עם תוקף-זמן — היא query-file-expiry. גם אם השאלה מציינת שם של בן משפחה ("של מזל"), זו עדיין query-file-expiry. שלוף מילות-מפתח ל-searchQuery (כולל שם בן המשפחה אם הוזכר).',
+    '- intent="unknown" רק לנושאים שמחוץ לטווח הבוט לחלוטין: שיחת חולין ("מה שלומך"), מזג אוויר, חדשות, חישובים, שאלות על המוצר עצמו. לעולם אל תחזיר unknown לשאלה תקפה על אירועים/משימות/לוח זמנים/קבצים-עם-תוקף.',
     '- אם המשתמש אמר "מחר" — startTime חייב להיות בתאריך todayIsoDate+1 (לא היום).',
     '- אם המשתמש אמר "היום" — startTime בתאריך todayIsoDate.',
     '- אל תעתיק תאריכים מהדוגמאות. תמיד חשב מחדש לפי todayIsoDate שניתן בראש ההודעה.',

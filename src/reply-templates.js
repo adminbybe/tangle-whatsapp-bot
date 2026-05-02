@@ -46,7 +46,7 @@ export function unlinkedMemberReply() {
 }
 
 export function unknownIntentReply() {
-  return 'לא הבנתי את הבקשה. אפשר לנסות לנסח אחרת? למשל: "תוסיפי פגישה עם דני מחר ב-14:00" או "מה יש לי השבוע?"';
+  return 'לא הבנתי את הבקשה. אפשר לנסח אחרת?';
 }
 
 export function internalErrorReply() {
