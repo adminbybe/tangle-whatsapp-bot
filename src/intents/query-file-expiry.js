@@ -17,6 +17,18 @@ const STOP_WORDS = new Set([
   'בכלל', 'עוד', 'שלי', 'שלך', 'שלו', 'שלה', 'שלנו',
 ]);
 
+// Hebrew synonym groups for common time-bound document categories. When the
+// user mentions any token in a group, we expand the search to all members of
+// that group so that — for example — "טסט" also matches files described as
+// "רישיון רכב", and "ביטוח" matches "פוליסה".
+const SYNONYM_GROUPS = [
+  ['טסט', 'רישיון', 'רישוי'],
+  ['ביטוח', 'פוליסה'],
+  ['חיסון', 'חיסונים', 'זריקה', 'תרכיב'],
+  ['דרכון', 'פספורט'],
+  ['חוזה', 'הסכם'],
+];
+
 function tokenize(query) {
   return String(query)
     .split(/\s+/)
@@ -35,20 +47,64 @@ function bestNameFor(f) {
   return f.description || f.originalName || 'המסמך';
 }
 
+// Pull family members and build a name-alias map so that querying by
+// firstName also matches nickname and vice versa (e.g. user says "מזל"
+// but the file is described under the legal name "אלם").
+async function buildFamilyAliasMap(familyId) {
+  try {
+    const snap = await db
+      .collection('familyMembers')
+      .where('familyId', '==', familyId)
+      .get();
+    const map = new Map();
+    for (const doc of snap.docs) {
+      const m = doc.data();
+      const names = [m.firstName, m.nickname]
+        .filter(Boolean)
+        .map((s) => String(s).trim().toLowerCase())
+        .filter((s) => s.length >= 2);
+      if (names.length < 2) continue;
+      for (const n of names) {
+        const existing = map.get(n) || new Set();
+        for (const other of names) existing.add(other);
+        map.set(n, existing);
+      }
+    }
+    return map;
+  } catch (err) {
+    console.error('[query-file-expiry] alias map failed:', err.message);
+    return new Map();
+  }
+}
+
+function expandTokens(tokens, aliasMap) {
+  const expanded = new Set();
+  for (const t of tokens) {
+    expanded.add(t);
+    const aliases = aliasMap.get(t);
+    if (aliases) for (const a of aliases) expanded.add(a);
+    for (const group of SYNONYM_GROUPS) {
+      if (group.includes(t)) for (const s of group) expanded.add(s);
+    }
+  }
+  return Array.from(expanded);
+}
+
 export async function queryFileExpiry({ sender, payload }) {
   const query = (payload?.searchQuery || '').trim();
   if (!query) {
     return { replyText: fileExpiryNotFoundReply(null) };
   }
 
-  const snap = await db
-    .collection('files')
-    .where('familyId', '==', sender.familyId)
-    .get();
+  const [snap, aliasMap] = await Promise.all([
+    db.collection('files').where('familyId', '==', sender.familyId).get(),
+    buildFamilyAliasMap(sender.familyId),
+  ]);
 
-  const tokens = tokenize(query);
+  const baseTokens = tokenize(query);
   // If the user gave only stop-words, fall back to literal substring match.
-  const fallbackTokens = tokens.length > 0 ? tokens : [query.toLowerCase()];
+  const seedTokens = baseTokens.length > 0 ? baseTokens : [query.toLowerCase()];
+  const fallbackTokens = expandTokens(seedTokens, aliasMap);
 
   const candidates = [];
   for (const docSnap of snap.docs) {
