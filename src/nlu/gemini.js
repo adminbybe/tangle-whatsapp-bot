@@ -7,7 +7,12 @@ import { NLU_RESPONSE_SCHEMA } from './schema.js';
 import { dayjs, FAMILY_TZ } from '../dates.js';
 
 const TIMEOUT_MS = 10_000;
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+// Default to the full flash model (not flash-lite). Lite was producing
+// inconsistent intent classification on the same exact input — same
+// "מתי הטסט של מזל נגמר?" alternated between query-file-expiry and
+// unknown, which felt like a broken bot to the user. Override via
+// GEMINI_MODEL env var if needed.
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 // Build few-shot examples with dates anchored to "today" so Gemini doesn't
 // copy stale dates from a hardcoded example. All dates here are computed
@@ -156,7 +161,9 @@ export async function parseMessage(rawText, senderName, todayIsoDate) {
     model = client.getGenerativeModel({
       model: MODEL_NAME,
       generationConfig: {
-        temperature: 0.2,
+        // 0 → deterministic. The same input always gets the same intent,
+        // which is the right tradeoff for a command parser.
+        temperature: 0,
         responseMimeType: 'application/json',
         responseSchema: NLU_RESPONSE_SCHEMA,
       },
