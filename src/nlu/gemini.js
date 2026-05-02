@@ -51,6 +51,15 @@ JSON: {"intent":"query-schedule","confidence":0.97,"payload":{"window":"next-wee
 הודעה: "תן לי את הלו"ז השבועי שלי החל ממחר"
 JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"next-week"}}
 
+הודעה: "מתי הטסט של מזל נגמר?"
+JSON: {"intent":"query-file-expiry","confidence":0.95,"payload":{"searchQuery":"טסט מזל"}}
+
+הודעה: "מתי פג הביטוח של הרכב?"
+JSON: {"intent":"query-file-expiry","confidence":0.93,"payload":{"searchQuery":"ביטוח רכב"}}
+
+הודעה: "כמה זמן יש לי על הרישיון?"
+JSON: {"intent":"query-file-expiry","confidence":0.9,"payload":{"searchQuery":"רישיון"}}
+
 הודעה: "אהלן מה קורה"
 JSON: {"intent":"unknown","confidence":0.1,"payload":{}}
 `;
@@ -65,6 +74,7 @@ function buildSystemPrompt(senderName, todayIsoDate) {
     '  • intent="add-event" → רק title, startTime, endTime, location, attendees, category. אסור window/taskTitle/forDate.',
     '  • intent="mark-task-done" → רק taskTitle, forDate. אסור title/startTime/window.',
     '  • intent="query-schedule" → רק window. אסור title/startTime/taskTitle.',
+    '  • intent="query-file-expiry" → רק searchQuery. אסור window/title/taskTitle. השתמש בכוונה הזו לשאלות "מתי X פג/נגמר/תקף", "כמה זמן יש לי על X", על מסמכים, רישיונות, ביטוחים, טסט רכב, תעודות חיסון, חוזים — כל קובץ עם תאריך תפוגה.',
     '  • intent="unknown" → payload ריק {}.',
     '- ל-add-event: title ו-startTime הם שדות חובה. אם המשתמש לא ציין שעה ברורה — השמט לגמרי את startTime (אל תמציא!), והורד את הביטחון מתחת ל-0.9.',
     '- כל ערכי startTime/endTime חייבים להיות ISO 8601 עם offset +03:00 או +02:00 לפי השעון בישראל.',

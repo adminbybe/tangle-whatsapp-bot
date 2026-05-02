@@ -58,13 +58,52 @@ export function greetingFor(displayName) {
   return `כן${safeName}, איך אפשר לעזור?`;
 }
 
+// Header shown above the bullet list when there are events.
+const SCHEDULE_HEADER_BY_WINDOW = {
+  today: 'היום:',
+  tomorrow: 'מחר:',
+  'this-week': 'השבוע:',
+  'next-week': 'השבוע הבא:',
+};
+
+// Message shown when the schedule is empty for the chosen window. Hebrew
+// preposition handling: "היום"/"מחר"/"השבוע" don't take a leading ב, but
+// "בשבוע הבא" does — so each window owns its phrasing instead of a generic
+// `אין לך אירועים ב${header}` template that produced ungrammatical output.
+const SCHEDULE_EMPTY_BY_WINDOW = {
+  today: 'אין לך אירועים היום.',
+  tomorrow: 'אין לך אירועים מחר.',
+  'this-week': 'אין לך אירועים השבוע.',
+  'next-week': 'אין לך אירועים בשבוע הבא.',
+};
+
 /**
- * @param {string} headerHebrew  e.g. "היום:" / "מחר:" / "השבוע:"
- * @param {string[]} lines       e.g. ["09:00 פגישה עם דני", "14:00 רופא"]
+ * @param {'today'|'tomorrow'|'this-week'|'next-week'} window
+ * @param {string[]} lines  e.g. ["09:00 פגישה עם דני", "14:00 רופא"]
  */
-export function scheduleReply(headerHebrew, lines) {
+export function scheduleReply(window, lines) {
   if (!lines || lines.length === 0) {
-    return `אין לך אירועים ב${headerHebrew.replace(':', '')}.`;
+    return SCHEDULE_EMPTY_BY_WINDOW[window] || 'אין לך אירועים בטווח הזה.';
   }
-  return `${headerHebrew}\n` + lines.map((l) => `- ${l}`).join('\n');
+  const header = SCHEDULE_HEADER_BY_WINDOW[window] || '';
+  return `${header}\n` + lines.map((l) => `- ${l}`).join('\n');
+}
+
+export function fileExpiryReply({ name, dateText, daysUntil }) {
+  let urgency = '';
+  if (typeof daysUntil === 'number') {
+    if (daysUntil < 0) {
+      urgency = ` (פג לפני ${Math.abs(daysUntil)} ימים)`;
+    } else if (daysUntil === 0) {
+      urgency = ' (פג היום)';
+    } else if (daysUntil <= 30) {
+      urgency = ` (בעוד ${daysUntil} ימים)`;
+    }
+  }
+  return `${name} פג תוקף ב-${dateText}${urgency}.`;
+}
+
+export function fileExpiryNotFoundReply(query) {
+  if (!query) return 'לא מצאתי קובץ עם תאריך תפוגה תואם.';
+  return `לא מצאתי קובץ עם תאריך תפוגה שמתאים ל"${query}".`;
 }

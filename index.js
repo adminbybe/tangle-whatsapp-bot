@@ -20,6 +20,7 @@ import { todayIsoDate } from './src/dates.js';
 import { addEvent, UnlinkedMemberError } from './src/intents/add-event.js';
 import { markTaskDone } from './src/intents/mark-task-done.js';
 import { querySchedule } from './src/intents/query-schedule.js';
+import { queryFileExpiry } from './src/intents/query-file-expiry.js';
 import { logBotMessage, updateBotMessageStatus } from './src/bot-message-log.js';
 import { undoManager } from './src/undo.js';
 import { parseTrigger, isAwake, setAwake } from './src/trigger.js';
@@ -150,6 +151,10 @@ function intentSummaryHebrew(intent, payload) {
   }
   if (intent === 'query-schedule') {
     return 'נראה שאת שואלת על האירועים שלך.';
+  }
+  if (intent === 'query-file-expiry') {
+    const q = payload?.searchQuery ? `"${payload.searchQuery}"` : 'מסמך';
+    return `נראה שאת שואלת מתי פג התוקף של ${q}.`;
   }
   return 'לא הצלחתי להבין את הבקשה.';
 }
@@ -299,6 +304,24 @@ async function executeIntent({ sender, intent, confidence, payload, rawText, fro
 
   if (intent === 'query-schedule') {
     const result = await querySchedule({ sender, payload });
+    await logBotMessage({
+      sender,
+      fromPhone,
+      rawText,
+      intent,
+      confidence,
+      payload,
+      actionStatus: 'auto-executed',
+      resultingEntityType: null,
+      resultingEntityId: null,
+      botReply: result.replyText,
+      undoExpiresAt: null,
+    });
+    return { replyText: result.replyText };
+  }
+
+  if (intent === 'query-file-expiry') {
+    const result = await queryFileExpiry({ sender, payload });
     await logBotMessage({
       sender,
       fromPhone,

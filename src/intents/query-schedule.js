@@ -5,12 +5,7 @@ import { db, Timestamp } from '../firebase-admin.js';
 import { dayjs, FAMILY_TZ, nowInTz, parseIsoToTz } from '../dates.js';
 import { scheduleReply } from '../reply-templates.js';
 
-const HEADER_BY_WINDOW = {
-  today: 'היום:',
-  tomorrow: 'מחר:',
-  'this-week': 'השבוע:',
-  'next-week': 'השבוע הבא:',
-};
+const KNOWN_WINDOWS = new Set(['today', 'tomorrow', 'this-week', 'next-week']);
 
 function rangeFor(window) {
   const now = nowInTz();
@@ -54,7 +49,7 @@ function rangeFor(window) {
  * @returns {Promise<{replyText: string}>}
  */
 export async function querySchedule({ sender, payload }) {
-  const window = payload?.window && HEADER_BY_WINDOW[payload.window]
+  const window = payload?.window && KNOWN_WINDOWS.has(payload.window)
     ? payload.window
     : 'today';
   const { start, end } = rangeFor(window);
@@ -84,5 +79,5 @@ export async function querySchedule({ sender, payload }) {
     lines.push(`${prefix} ${e.title}`);
   }
 
-  return { replyText: scheduleReply(HEADER_BY_WINDOW[window], lines) };
+  return { replyText: scheduleReply(window, lines) };
 }
