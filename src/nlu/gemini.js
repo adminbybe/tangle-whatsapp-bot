@@ -171,7 +171,7 @@ export async function parseMessage(rawText, senderName, todayIsoDate) {
     ) {
       return unknownResult('schema-mismatch: ' + JSON.stringify(parsed).slice(0, 200));
     }
-    const allowed = ['add-event', 'mark-task-done', 'query-schedule', 'unknown'];
+    const allowed = ['add-event', 'mark-task-done', 'query-schedule', 'query-file-expiry', 'unknown'];
     if (!allowed.includes(parsed.intent)) {
       return unknownResult('bad-intent: ' + parsed.intent);
     }
