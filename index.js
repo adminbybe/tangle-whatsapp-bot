@@ -119,6 +119,24 @@ app.listen(API_PORT, () => {
   console.log(`שרת API פועל על פורט ${API_PORT}`);
 });
 
+// Keep-alive self-ping. Render's free tier hibernates the service after
+// ~15 minutes with no incoming HTTP traffic, which silently breaks the
+// long-lived Baileys WebSocket and leaves the bot looking "connected" but
+// unable to send messages. We hit our own public /status endpoint every
+// few minutes so the idle timer never trips. SELF_PING_URL can be unset
+// to disable (e.g. local dev) — only kicks in if the env var resolves to
+// an https URL that's not localhost.
+const SELF_PING_URL = process.env.SELF_PING_URL;
+const SELF_PING_INTERVAL_MS = 10 * 60 * 1000;
+if (SELF_PING_URL && /^https:\/\//.test(SELF_PING_URL)) {
+  setInterval(() => {
+    fetch(SELF_PING_URL).catch((err) => {
+      console.warn('[self-ping] failed:', err.message);
+    });
+  }, SELF_PING_INTERVAL_MS);
+  console.log(`[self-ping] enabled, every ${SELF_PING_INTERVAL_MS / 1000}s`);
+}
+
 // ── Message handling ───────────────────────────────────────────────────────
 
 // Try to extract a time-of-day from a short user follow-up like "15:00",
