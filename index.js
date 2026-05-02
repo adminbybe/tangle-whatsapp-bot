@@ -723,13 +723,23 @@ async function startBot() {
       }
     });
 
-    // Wrap sendMessage so EVERY message the bot sends is cached for getMessage()
-    // and recognized by the loop-guard in handleIncomingMessage. Wrapping at the
-    // sendMessage boundary (instead of caching all fromMe events) ensures we
-    // only cache OUR outgoing replies, not the user's Note-to-self messages.
+    // Wrap sendMessage so EVERY message the bot sends is (a) prefixed with the
+    // bot's identity tag — so the user can visually distinguish bot replies from
+    // their own messages, especially in the Note-to-Self chat where both share
+    // the same bubble color — and (b) cached for getMessage() and the loop-guard
+    // in handleIncomingMessage.
     const _origSendMessage = sock.sendMessage.bind(sock);
+    const BOT_PREFIX = "*ג'רוויס:* ";
     sock.sendMessage = async (jid, content, options) => {
-      const result = await _origSendMessage(jid, content, options);
+      let outgoing = content;
+      if (
+        content &&
+        typeof content.text === 'string' &&
+        !content.text.startsWith(BOT_PREFIX)
+      ) {
+        outgoing = { ...content, text: BOT_PREFIX + content.text };
+      }
+      const result = await _origSendMessage(jid, outgoing, options);
       if (result?.key?.id) {
         cacheOutgoing(result.key, result);
       }

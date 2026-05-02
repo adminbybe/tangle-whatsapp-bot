@@ -9,6 +9,7 @@ const HEADER_BY_WINDOW = {
   today: 'היום:',
   tomorrow: 'מחר:',
   'this-week': 'השבוע:',
+  'next-week': 'השבוע הבא:',
 };
 
 function rangeFor(window) {
@@ -19,11 +20,25 @@ function rangeFor(window) {
     return { start, end };
   }
   if (window === 'this-week') {
-    // From now until end-of-Saturday in Israel (Sat = day 6).
-    const start = now;
+    // Israeli week: Sun..Sat (Sat = dow 6 = last day). When today already IS
+    // Saturday the user almost certainly means "the upcoming week" rather than
+    // "just the rest of today" — extend to end of next Saturday in that case.
     const dow = now.day(); // 0=Sun ... 6=Sat
-    const daysUntilSat = (6 - dow + 7) % 7;
+    if (dow === 6) {
+      const end = now.add(7, 'day').endOf('day').add(1, 'millisecond');
+      return { start: now, end };
+    }
+    const start = now;
+    const daysUntilSat = 6 - dow;
     const end = now.add(daysUntilSat, 'day').endOf('day').add(1, 'millisecond');
+    return { start, end };
+  }
+  if (window === 'next-week') {
+    // From start of the upcoming Sunday through end of the following Saturday.
+    const dow = now.day(); // 0=Sun ... 6=Sat
+    const daysUntilNextSunday = ((7 - dow) % 7) || 7;
+    const start = now.add(daysUntilNextSunday, 'day').startOf('day');
+    const end = start.add(7, 'day');
     return { start, end };
   }
   // default 'today'
@@ -60,7 +75,7 @@ export async function querySchedule({ sender, payload }) {
     if (!startTs) continue;
     const local = dayjs(startTs).tz(FAMILY_TZ);
     let prefix;
-    if (window === 'this-week') {
+    if (window === 'this-week' || window === 'next-week') {
       // Multi-day list: include day name + time
       prefix = local.locale('he').format('dddd HH:mm');
     } else {

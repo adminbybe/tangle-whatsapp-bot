@@ -30,7 +30,7 @@ export const NLU_RESPONSE_SCHEMA = {
         'location, attendees, category. If the user did not state a clear time, ' +
         'omit startTime entirely (do NOT guess) and lower confidence. ' +
         'For intent="mark-task-done": REQUIRED taskTitle, REQUIRED forDate (YYYY-MM-DD). ' +
-        'For intent="query-schedule": REQUIRED window (today|tomorrow|this-week). ' +
+        'For intent="query-schedule": REQUIRED window (today|tomorrow|this-week|next-week). ' +
         'For intent="unknown": empty object {}.',
       properties: {
         title: {
@@ -73,7 +73,7 @@ export const NLU_RESPONSE_SCHEMA = {
         },
         window: {
           type: 'string',
-          enum: ['today', 'tomorrow', 'this-week'],
+          enum: ['today', 'tomorrow', 'this-week', 'next-week'],
           description: 'query-schedule ONLY: which time window the user asked about.',
         },
       },
