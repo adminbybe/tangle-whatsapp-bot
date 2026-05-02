@@ -108,7 +108,11 @@ export function fileExpiryReply({ name, dateText, daysUntil }) {
   return `${name} פג תוקף ב-${dateText}${urgency}.`;
 }
 
-export function fileExpiryNotFoundReply(query) {
-  if (!query) return 'לא מצאתי קובץ עם תאריך תפוגה תואם.';
-  return `לא מצאתי קובץ עם תאריך תפוגה שמתאים ל"${query}".`;
+export function fileExpiryNotFoundReply(query, knownFiles = []) {
+  const head = query
+    ? `לא מצאתי קובץ עם תאריך תפוגה שמתאים ל"${query}".`
+    : 'לא מצאתי קובץ עם תאריך תפוגה תואם.';
+  if (!Array.isArray(knownFiles) || knownFiles.length === 0) return head;
+  const lines = knownFiles.slice(0, 8).map((f) => `- ${f}`).join('\n');
+  return `${head}\nאלה הקבצים עם תאריך תפוגה שאני מכיר:\n${lines}`;
 }

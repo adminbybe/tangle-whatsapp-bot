@@ -106,11 +106,13 @@ export async function queryFileExpiry({ sender, payload }) {
   const seedTokens = baseTokens.length > 0 ? baseTokens : [query.toLowerCase()];
   const fallbackTokens = expandTokens(seedTokens, aliasMap);
 
+  const filesWithExpiry = [];
   const candidates = [];
   for (const docSnap of snap.docs) {
     const f = docSnap.data();
     if (!f.expiresAt) continue;
     if (f.archivedAt) continue;
+    filesWithExpiry.push(f);
     const haystack = fileHaystack(f);
     let score = 0;
     for (const t of fallbackTokens) {
@@ -119,8 +121,25 @@ export async function queryFileExpiry({ sender, payload }) {
     if (score > 0) candidates.push({ score, file: f });
   }
 
+  console.log('[query-file-expiry]', JSON.stringify({
+    query,
+    baseTokens,
+    expanded: fallbackTokens,
+    aliasMapSize: aliasMap.size,
+    filesScanned: snap.size,
+    filesWithExpiry: filesWithExpiry.length,
+    candidates: candidates.length,
+  }));
+
   if (candidates.length === 0) {
-    return { replyText: fileExpiryNotFoundReply(query) };
+    const knownNames = filesWithExpiry
+      .sort((a, b) => {
+        const ax = a.expiresAt?.toMillis ? a.expiresAt.toMillis() : 0;
+        const bx = b.expiresAt?.toMillis ? b.expiresAt.toMillis() : 0;
+        return ax - bx;
+      })
+      .map((f) => bestNameFor(f));
+    return { replyText: fileExpiryNotFoundReply(query, knownNames) };
   }
 
   // Higher score wins; ties broken by earliest upcoming expiry.
