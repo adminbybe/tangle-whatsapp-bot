@@ -64,17 +64,22 @@ const SCHEDULE_HEADER_BY_WINDOW = {
   tomorrow: 'מחר:',
   'this-week': 'השבוע:',
   'next-week': 'השבוע הבא:',
+  'this-month': 'החודש:',
+  'next-month': 'החודש הבא:',
 };
 
 // Message shown when the schedule is empty for the chosen window. Hebrew
-// preposition handling: "היום"/"מחר"/"השבוע" don't take a leading ב, but
-// "בשבוע הבא" does — so each window owns its phrasing instead of a generic
-// `אין לך אירועים ב${header}` template that produced ungrammatical output.
+// preposition handling: "היום"/"מחר"/"השבוע"/"החודש" don't take a leading ב,
+// but "בשבוע הבא"/"בחודש הבא" do — so each window owns its phrasing instead
+// of a generic `אין לך אירועים ב${header}` template that produced
+// ungrammatical output.
 const SCHEDULE_EMPTY_BY_WINDOW = {
   today: 'אין לך אירועים היום.',
   tomorrow: 'אין לך אירועים מחר.',
   'this-week': 'אין לך אירועים השבוע.',
   'next-week': 'אין לך אירועים בשבוע הבא.',
+  'this-month': 'אין לך אירועים החודש.',
+  'next-month': 'אין לך אירועים בחודש הבא.',
 };
 
 /**

@@ -51,6 +51,12 @@ JSON: {"intent":"query-schedule","confidence":0.97,"payload":{"window":"next-wee
 הודעה: "תן לי את הלו"ז השבועי שלי החל ממחר"
 JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"next-week"}}
 
+הודעה: "מה יש לי החודש?"
+JSON: {"intent":"query-schedule","confidence":0.97,"payload":{"window":"this-month"}}
+
+הודעה: "מה יש לי החודש הבא?"
+JSON: {"intent":"query-schedule","confidence":0.95,"payload":{"window":"next-month"}}
+
 הודעה: "מתי הטסט של מזל נגמר?"
 JSON: {"intent":"query-file-expiry","confidence":0.95,"payload":{"searchQuery":"טסט מזל"}}
 
@@ -78,7 +84,8 @@ function buildSystemPrompt(senderName, todayIsoDate) {
     '  • intent="unknown" → payload ריק {}.',
     '- ל-add-event: title ו-startTime הם שדות חובה. אם המשתמש לא ציין שעה ברורה — השמט לגמרי את startTime (אל תמציא!), והורד את הביטחון מתחת ל-0.9.',
     '- כל ערכי startTime/endTime חייבים להיות ISO 8601 עם offset +03:00 או +02:00 לפי השעון בישראל.',
-    '- ב-query-schedule: window="this-week" כשהמשתמש שואל על השבוע הנוכחי. window="next-week" כשהוא שואל "השבוע הבא", "בשבוע הבא", או "הלו"ז השבועי החל ממחר". אם today הוא יום שבת והמשתמש אומר "השבוע" סתם, נטה ל-this-week (הקוד יטפל בזה הגיוני).',
+    '- ב-query-schedule: window="this-week" כשהמשתמש שואל על השבוע הנוכחי. window="next-week" כשהוא שואל "השבוע הבא", "בשבוע הבא", או "הלו"ז השבועי החל ממחר". window="this-month" כשהוא שואל "מה יש לי החודש", "החודש הזה", "החודש הקרוב". window="next-month" כשהוא שואל "החודש הבא". אם today הוא יום שבת והמשתמש אומר "השבוע" סתם, נטה ל-this-week (הקוד יטפל בזה הגיוני).',
+    '- חשוב מאוד: אם השאלה לא מתאימה בדיוק לאחד מה-intents הקיימים (לדוגמה שאלה על אנשים, פרטי קשר, מסמכים שלא ברור אם הם תוקפים, או נושא לא מוכר) — החזר intent="unknown" עם confidence נמוך. אסור לכפות התאמה לכוונה הקרובה ביותר רק כי היא קיימת.',
     '- אם המשתמש אמר "מחר" — startTime חייב להיות בתאריך todayIsoDate+1 (לא היום).',
     '- אם המשתמש אמר "היום" — startTime בתאריך todayIsoDate.',
     '- אל תעתיק תאריכים מהדוגמאות. תמיד חשב מחדש לפי todayIsoDate שניתן בראש ההודעה.',

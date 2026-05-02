@@ -32,7 +32,7 @@ export const NLU_RESPONSE_SCHEMA = {
         'location, attendees, category. If the user did not state a clear time, ' +
         'omit startTime entirely (do NOT guess) and lower confidence. ' +
         'For intent="mark-task-done": REQUIRED taskTitle, REQUIRED forDate (YYYY-MM-DD). ' +
-        'For intent="query-schedule": REQUIRED window (today|tomorrow|this-week|next-week). ' +
+        'For intent="query-schedule": REQUIRED window (today|tomorrow|this-week|next-week|this-month|next-month). ' +
         'For intent="query-file-expiry": REQUIRED searchQuery — the meaningful ' +
         'Hebrew keywords from the question (e.g. user says "מתי הטסט של מזל ' +
         'נגמר?" → searchQuery="טסט מזל"). Strip stop-words like של/את/מתי. ' +
@@ -78,7 +78,7 @@ export const NLU_RESPONSE_SCHEMA = {
         },
         window: {
           type: 'string',
-          enum: ['today', 'tomorrow', 'this-week', 'next-week'],
+          enum: ['today', 'tomorrow', 'this-week', 'next-week', 'this-month', 'next-month'],
           description: 'query-schedule ONLY: which time window the user asked about.',
         },
         searchQuery: {
