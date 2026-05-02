@@ -29,6 +29,18 @@ const SYNONYM_GROUPS = [
   ['חוזה', 'הסכם'],
 ];
 
+// Hebrew relational terms keyed by who they refer to from the speaker's
+// perspective. We expand each term to the family member(s) that match the
+// relationship at search time, so "אשתי"/"בעלי" finds the actual person.
+const SPOUSE_TERMS = [
+  'אשתי', 'בעלי', 'זוגתי', 'זוגי', 'בעל', 'אישה', 'אשתו', 'בעלה',
+  'הבעל', 'האישה', 'האשה',
+];
+const CHILD_TERMS = [
+  'בני', 'בתי', 'הבן', 'הבת', 'הילד', 'הילדה', 'בן', 'בת',
+];
+const PARENT_TERMS = ['אבא', 'אמא', 'אבי', 'אמי', 'הורה', 'ההורים', 'הורי'];
+
 function tokenize(query) {
   return String(query)
     .split(/\s+/)
@@ -47,29 +59,87 @@ function bestNameFor(f) {
   return f.description || f.originalName || 'המסמך';
 }
 
+// Returns all forms of a member's name (firstName + nickname) lowercased.
+function memberNames(m) {
+  return [m.firstName, m.nickname]
+    .filter(Boolean)
+    .map((s) => String(s).trim().toLowerCase())
+    .filter((s) => s.length >= 2);
+}
+
 // Pull family members and build a name-alias map so that querying by
-// firstName also matches nickname and vice versa (e.g. user says "מזל"
-// but the file is described under the legal name "אלם").
-async function buildFamilyAliasMap(familyId) {
+// firstName also matches nickname (e.g. user says "מזל" but the file is
+// described under the legal name "אלם"), AND so that relational terms
+// ("אשתי"/"בעלי"/"הבן"/"אמא") resolve to the right person from the
+// speaker's perspective.
+async function buildFamilyAliasMap(familyId, sender) {
   try {
     const snap = await db
       .collection('familyMembers')
       .where('familyId', '==', familyId)
       .get();
+    const allMembers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     const map = new Map();
-    for (const doc of snap.docs) {
-      const m = doc.data();
-      const names = [m.firstName, m.nickname]
-        .filter(Boolean)
-        .map((s) => String(s).trim().toLowerCase())
-        .filter((s) => s.length >= 2);
+
+    // 1) Standard firstName ↔ nickname aliases for every member.
+    for (const m of allMembers) {
+      const names = memberNames(m);
       if (names.length < 2) continue;
       for (const n of names) {
-        const existing = map.get(n) || new Set();
-        for (const other of names) existing.add(other);
-        map.set(n, existing);
+        const set = map.get(n) || new Set();
+        for (const o of names) set.add(o);
+        map.set(n, set);
       }
     }
+
+    // 2) Relational terms that depend on the speaker's role.
+    if (sender) {
+      const senderRole = sender.role;
+      const senderId = sender.memberId;
+      const otherMembers = allMembers.filter((m) => m.id !== senderId);
+
+      // Spouse: when speaker is a parent, "אשתי"/"בעלי"/etc map to the
+      // OTHER parents in the family (most families have exactly one).
+      if (senderRole === 'parent') {
+        const spouseNames = otherMembers
+          .filter((m) => m.role === 'parent')
+          .flatMap(memberNames);
+        if (spouseNames.length) {
+          for (const term of SPOUSE_TERMS) {
+            const set = map.get(term) || new Set();
+            for (const n of spouseNames) set.add(n);
+            map.set(term, set);
+          }
+        }
+      }
+
+      // Child: any speaker can ask about "הבן/הבת/הילד/הילדה".
+      const childNames = otherMembers
+        .filter((m) => m.role === 'child')
+        .flatMap(memberNames);
+      if (childNames.length) {
+        for (const term of CHILD_TERMS) {
+          const set = map.get(term) || new Set();
+          for (const n of childNames) set.add(n);
+          map.set(term, set);
+        }
+      }
+
+      // Parent: when speaker is a child, "אבא"/"אמא"/etc map to parents.
+      if (senderRole === 'child') {
+        const parentNames = otherMembers
+          .filter((m) => m.role === 'parent')
+          .flatMap(memberNames);
+        if (parentNames.length) {
+          for (const term of PARENT_TERMS) {
+            const set = map.get(term) || new Set();
+            for (const n of parentNames) set.add(n);
+            map.set(term, set);
+          }
+        }
+      }
+    }
+
     return map;
   } catch (err) {
     console.error('[query-file-expiry] alias map failed:', err.message);
@@ -77,14 +147,28 @@ async function buildFamilyAliasMap(familyId) {
   }
 }
 
+// Strip the Hebrew definite-article ה when it's a prefix on a 4+ letter
+// token. Lets "הטסט"/"הרישיון" match the same haystack as "טסט"/"רישיון".
+// Conservative — only strips ה (the most common prefix) and only when it
+// leaves a meaningful word behind.
+function stripHebrewPrefix(token) {
+  if (token.length >= 4 && token.startsWith('ה')) return token.slice(1);
+  return token;
+}
+
 function expandTokens(tokens, aliasMap) {
   const expanded = new Set();
-  for (const t of tokens) {
-    expanded.add(t);
-    const aliases = aliasMap.get(t);
-    if (aliases) for (const a of aliases) expanded.add(a);
-    for (const group of SYNONYM_GROUPS) {
-      if (group.includes(t)) for (const s of group) expanded.add(s);
+  for (const raw of tokens) {
+    const variants = new Set([raw]);
+    const stripped = stripHebrewPrefix(raw);
+    if (stripped !== raw) variants.add(stripped);
+    for (const t of variants) {
+      expanded.add(t);
+      const aliases = aliasMap.get(t);
+      if (aliases) for (const a of aliases) expanded.add(a);
+      for (const group of SYNONYM_GROUPS) {
+        if (group.includes(t)) for (const s of group) expanded.add(s);
+      }
     }
   }
   return Array.from(expanded);
@@ -98,7 +182,7 @@ export async function queryFileExpiry({ sender, payload }) {
 
   const [snap, aliasMap] = await Promise.all([
     db.collection('files').where('familyId', '==', sender.familyId).get(),
-    buildFamilyAliasMap(sender.familyId),
+    buildFamilyAliasMap(sender.familyId, sender),
   ]);
 
   const baseTokens = tokenize(query);

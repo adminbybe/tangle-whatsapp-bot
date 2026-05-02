@@ -13,6 +13,8 @@ const cache = new Map(); // phone -> { value, expiresAt }
  * @property {string} memberId
  * @property {string|null} linkedUserId
  * @property {string} displayName
+ * @property {string|null} nickname
+ * @property {'parent'|'child'|'other'|null} role
  * @property {string} phone
  */
 
@@ -47,6 +49,8 @@ export async function resolveSender(e164) {
     memberId: doc.id,
     linkedUserId: data.linkedUserId ?? null,
     displayName: data.firstName || 'משתמש',
+    nickname: data.nickname ?? null,
+    role: data.role ?? null,
     phone: e164,
   };
   cache.set(e164, { value, expiresAt: Date.now() + CACHE_TTL_MS });

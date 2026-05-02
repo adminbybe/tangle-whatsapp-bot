@@ -80,6 +80,12 @@ JSON: {"intent":"query-file-expiry","confidence":0.9,"payload":{"searchQuery":"�
 הודעה: "עד מתי תקף הביטוח של הבית?"
 JSON: {"intent":"query-file-expiry","confidence":0.92,"payload":{"searchQuery":"ביטוח בית"}}
 
+הודעה: "מתי הטסט של אשתי נגמר?"
+JSON: {"intent":"query-file-expiry","confidence":0.95,"payload":{"searchQuery":"טסט אשתי"}}
+
+הודעה: "מתי פג הדרכון של הילד?"
+JSON: {"intent":"query-file-expiry","confidence":0.93,"payload":{"searchQuery":"דרכון הילד"}}
+
 הודעה: "אהלן מה קורה"
 JSON: {"intent":"unknown","confidence":0.1,"payload":{}}
 `;
