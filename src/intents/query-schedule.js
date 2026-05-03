@@ -104,10 +104,10 @@ function iconForEvent(event, membersById, petsById, allMembers, allPets) {
   const eventPets = Array.isArray(event.petIds) ? event.petIds : [];
 
   if (attendees.length === 0 && eventPets.length === 0) {
-    // Truly untagged → represent the whole family.
-    const memberIcons = allMembers.map((m) => iconForMember(m));
-    const petIcons = allPets.map((p) => iconForPet(p));
-    const composite = [...memberIcons, ...petIcons].slice(0, 6).join('');
+    // Truly untagged → represent the human family. Pets are deliberately
+    // excluded here: a "family dinner" or a household errand is for the
+    // people, and crowding the icon with the dog adds noise.
+    const composite = allMembers.map((m) => iconForMember(m)).slice(0, 6).join('');
     return composite || '🏠';
   }
 
