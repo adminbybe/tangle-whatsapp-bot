@@ -208,16 +208,23 @@ export async function querySchedule({ sender, payload }) {
     resolved && (resolved.kind === 'self' || resolved.kind === 'member')
       ? resolved.id
       : null;
+  const strict = payload?.strict === true;
 
   const lines = [];
   for (const e of allEvents) {
     if (filterMemberId) {
       const attendees = Array.isArray(e.attendeeMemberIds) ? e.attendeeMemberIds : [];
-      // "רק לי" / "רק <name>" semantics: include the event only when the
-      // target is the SOLE tagged attendee. Family-wide events (multiple
-      // attendees, or no attendees but isPrivate=false) are excluded so
-      // the user gets the focused list they asked for.
-      if (attendees.length !== 1 || attendees[0] !== filterMemberId) continue;
+      if (strict) {
+        // "רק לי" / "רק <name>" — only events where target is the SOLE attendee.
+        if (attendees.length !== 1 || attendees[0] !== filterMemberId) continue;
+      } else {
+        // Default "מה יש לי" / "מה יש למזל" — include events where target
+        // appears in attendees, plus untagged events (visible to the whole
+        // family). Exclude events tagged exclusively to other people.
+        const targetTagged = attendees.includes(filterMemberId);
+        const untagged = attendees.length === 0;
+        if (!targetTagged && !untagged) continue;
+      }
     }
     const startTs = e.startTime?.toDate?.();
     if (!startTs) continue;

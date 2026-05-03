@@ -88,11 +88,19 @@ export const NLU_RESPONSE_SCHEMA = {
           type: 'string',
           description:
             'query-schedule ONLY (optional): filter the schedule to events ' +
-            'tagged with a specific family member. Use "self" if the user said ' +
-            '"רק לי" / "מה יש לי לבד". Otherwise put the name as the user said ' +
-            'it ("מזל", "אלם") or the relational term ("אשתי", "בעלי", "הבן", ' +
-            '"הבת", "אבא", "אמא"). Omit when the user wants the full family ' +
-            'schedule.',
+            'involving a specific family member or pet. Use "self" if the user ' +
+            'mentioned themselves ("מה יש לי", "מה יש רק לי"). Otherwise put the ' +
+            'name as the user said it ("מזל", "אלם", "ברי") or a relational term ' +
+            '("אשתי", "בעלי", "הבן", "הבת", "אבא", "אמא"). Omit only when the ' +
+            'user explicitly asks for the full family schedule.',
+        },
+        strict: {
+          type: 'boolean',
+          description:
+            'query-schedule ONLY (optional): true when the user said "רק" ' +
+            '("מה יש רק לי", "מה יש רק למזל") — meaning include events where ' +
+            'the target is the SOLE attendee, excluding shared events. ' +
+            'Default false: include any event the target appears in.',
         },
         searchQuery: {
           type: 'string',
@@ -115,6 +123,7 @@ export const NLU_RESPONSE_SCHEMA = {
         'forDate',
         'window',
         'forMember',
+        'strict',
         'searchQuery',
       ],
     },
