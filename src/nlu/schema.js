@@ -33,9 +33,9 @@ export const NLU_RESPONSE_SCHEMA = {
         'omit startTime entirely (do NOT guess) and lower confidence. ' +
         'For intent="mark-task-done": REQUIRED taskTitle, REQUIRED forDate (YYYY-MM-DD). ' +
         'For intent="query-schedule": REQUIRED window (today|tomorrow|this-week|next-week|this-month|next-month). ' +
-        'OPTIONAL forMember — set when the user wants events of a specific ' +
-        'person ("רק לי", "של מזל", "של אשתי"). Use "self" for the speaker, ' +
-        'or the person\'s Hebrew name / nickname / relational term. ' +
+        'OPTIONAL forMembers — array of names/relational terms when the user ' +
+        'wants events of specific people / pets ("רק לי", "של מזל", "לי ולאשתי"). ' +
+        'Use "self" for the speaker, or person/pet names / relational terms. ' +
         'For intent="query-file-expiry": REQUIRED searchQuery — the meaningful ' +
         'Hebrew keywords from the question (e.g. user says "מתי הטסט של מזל ' +
         'נגמר?" → searchQuery="טסט מזל"). Strip stop-words like של/את/מתי. ' +
@@ -84,13 +84,14 @@ export const NLU_RESPONSE_SCHEMA = {
           enum: ['today', 'tomorrow', 'this-week', 'next-week', 'this-month', 'next-month'],
           description: 'query-schedule ONLY: which time window the user asked about.',
         },
-        forMember: {
-          type: 'string',
+        forMembers: {
+          type: 'array',
+          items: { type: 'string' },
           description:
-            'query-schedule ONLY (optional): filter the schedule to events ' +
-            'involving a specific family member or pet. Use "self" if the user ' +
-            'mentioned themselves ("מה יש לי", "מה יש רק לי"). Otherwise put the ' +
-            'name as the user said it ("מזל", "אלם", "ברי") or a relational term ' +
+            'query-schedule ONLY (optional): one or more family members / pets ' +
+            'to filter the schedule by. Use "self" for the speaker. Multiple ' +
+            'targets give a UNION ("מה יש לי ולאשתי" → ["self", "אשתי"]). ' +
+            'Names can be firstName, nickname, pet name, or relational terms ' +
             '("אשתי", "בעלי", "הבן", "הבת", "אבא", "אמא"). Omit only when the ' +
             'user explicitly asks for the full family schedule.',
         },
@@ -122,7 +123,7 @@ export const NLU_RESPONSE_SCHEMA = {
         'taskTitle',
         'forDate',
         'window',
-        'forMember',
+        'forMembers',
         'strict',
         'searchQuery',
       ],

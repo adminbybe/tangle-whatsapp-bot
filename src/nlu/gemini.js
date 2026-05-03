@@ -69,34 +69,43 @@ JSON: {"intent":"query-schedule","confidence":0.97,"payload":{"window":"next-wee
 JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"next-week"}}
 
 הודעה: "מה יש לי החודש?"
-JSON: {"intent":"query-schedule","confidence":0.97,"payload":{"window":"this-month","forMember":"self"}}
+JSON: {"intent":"query-schedule","confidence":0.97,"payload":{"window":"this-month","forMembers":["self"]}}
 
 הודעה: "מה יש לי השבוע?"
-JSON: {"intent":"query-schedule","confidence":0.97,"payload":{"window":"this-week","forMember":"self"}}
+JSON: {"intent":"query-schedule","confidence":0.97,"payload":{"window":"this-week","forMembers":["self"]}}
 
 הודעה: "מה יש לי החודש הבא?"
-JSON: {"intent":"query-schedule","confidence":0.95,"payload":{"window":"next-month","forMember":"self"}}
+JSON: {"intent":"query-schedule","confidence":0.95,"payload":{"window":"next-month","forMembers":["self"]}}
 
 הודעה: "מה יש רק לי החודש?"
-JSON: {"intent":"query-schedule","confidence":0.94,"payload":{"window":"this-month","forMember":"self","strict":true}}
+JSON: {"intent":"query-schedule","confidence":0.94,"payload":{"window":"this-month","forMembers":["self"],"strict":true}}
 
 הודעה: "מה יש לי לבד השבוע?"
-JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-week","forMember":"self","strict":true}}
+JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-week","forMembers":["self"],"strict":true}}
 
 הודעה: "מה יש למזל החודש?"
-JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-month","forMember":"מזל"}}
+JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-month","forMembers":["מזל"]}}
 
 הודעה: "מה יש רק למזל החודש?"
-JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"this-month","forMember":"מזל","strict":true}}
+JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"this-month","forMembers":["מזל"],"strict":true}}
 
 הודעה: "מה יש לאשתי השבוע?"
-JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"this-week","forMember":"אשתי"}}
+JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"this-week","forMembers":["אשתי"]}}
+
+הודעה: "תן לי את הלו"ז שלי ואת הלו"ז של מזל החודש"
+JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-month","forMembers":["self","מזל"]}}
+
+הודעה: "מה יש לי ולאשתי השבוע?"
+JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"this-week","forMembers":["self","אשתי"]}}
+
+הודעה: "מה יש לי ולברי החודש?"
+JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"this-month","forMembers":["self","ברי"]}}
 
 הודעה: "מה יש לברי החודש?"
-JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-month","forMember":"ברי"}}
+JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-month","forMembers":["ברי"]}}
 
 הודעה: "מה יש לכלבה השבוע?"
-JSON: {"intent":"query-schedule","confidence":0.9,"payload":{"window":"this-week","forMember":"כלבה"}}
+JSON: {"intent":"query-schedule","confidence":0.9,"payload":{"window":"this-week","forMembers":["כלבה"]}}
 
 הודעה: "מתי הטסט של מזל נגמר?"
 JSON: {"intent":"query-file-expiry","confidence":0.95,"payload":{"searchQuery":"טסט מזל"}}
@@ -141,7 +150,7 @@ function buildSystemPrompt(senderName, todayIsoDate) {
     '- ל-add-event: title ו-startTime הם שדות חובה. אם המשתמש לא ציין שעה ברורה — השמט לגמרי את startTime (אל תמציא!), והורד את הביטחון מתחת ל-0.9.',
     '- כל ערכי startTime/endTime חייבים להיות ISO 8601 עם offset +03:00 או +02:00 לפי השעון בישראל.',
     '- ב-query-schedule: window="this-week" כשהמשתמש שואל על השבוע הנוכחי. window="next-week" כשהוא שואל "השבוע הבא", "בשבוע הבא", או "הלו"ז השבועי החל ממחר". window="this-month" כשהוא שואל "מה יש לי החודש", "החודש הזה", "החודש הקרוב". window="next-month" כשהוא שואל "החודש הבא". אם today הוא יום שבת והמשתמש אומר "השבוע" סתם, נטה ל-this-week (הקוד יטפל בזה הגיוני).',
-    '- ב-query-schedule: כשהמשתמש מציין את עצמו ("מה יש לי", "מה הלו"ז שלי") — תמיד forMember="self". כשהוא מציין שם ("מה יש למזל", "של אשתי") — forMember=השם. strict=true רק כשהמשתמש מוסיף "רק" ("מה יש *רק* לי", "מה יש *רק* למזל") — סינון קשיח של אירוע ש-target הוא היחיד שמתויג בו. בלי "רק" → strict לא מצוין (filtering soft: כל אירוע שה-target מופיע בו).',
+    '- ב-query-schedule: כשהמשתמש מציין את עצמו ("מה יש לי", "מה הלו"ז שלי") — forMembers=["self"]. כשהוא מציין שם ("מה יש למזל", "של אשתי") — forMembers=[השם]. כשהוא מציין כמה אנשים ("הלו"ז שלי ושל אשתי", "מה יש לי ולברי") — forMembers הוא מערך עם כל השמות, בסדר ההופעה ("self" כשהוא הזכיר את עצמו). strict=true רק כשהמשתמש מוסיף "רק" ("מה יש *רק* לי") — סינון קשיח של אירוע ש-target הוא היחיד המתויג. בלי "רק" → strict לא מצוין (filtering soft: כל אירוע שאחד מהיעדים מופיע בו).',
     '- ב-query-file-expiry: כל שאלה בנוסח "מתי X פג / נגמר / עד מתי תקף / כמה זמן יש על X" על מסמך, רישיון, ביטוח, טסט רכב, חיסון, דרכון, חוזה, או כל פריט עם תוקף-זמן — היא query-file-expiry. גם אם השאלה מציינת שם של בן משפחה ("של מזל"), זו עדיין query-file-expiry. שלוף מילות-מפתח ל-searchQuery (כולל שם בן המשפחה אם הוזכר).',
     '- intent="unknown" רק לנושאים שמחוץ לטווח הבוט לחלוטין: שיחת חולין ("מה שלומך"), מזג אוויר, חדשות, חישובים, שאלות על המוצר עצמו. לעולם אל תחזיר unknown לשאלה תקפה על אירועים/משימות/לוח זמנים/קבצים-עם-תוקף.',
     '- אם המשתמש אמר "מחר" — startTime חייב להיות בתאריך todayIsoDate+1 (לא היום).',

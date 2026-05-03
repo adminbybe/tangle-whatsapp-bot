@@ -140,97 +140,114 @@ export async function querySchedule({ sender, payload }) {
     : 'today';
   const { start, end } = rangeFor(window);
 
-  // Resolve the optional forMember filter into a member or a pet.
-  let resolved = null;
-  if (payload?.forMember) {
-    resolved = await resolveEntity({
-      familyId: sender.familyId,
-      sender,
-      name: payload.forMember,
-    });
-    if (resolved.kind === 'unknown') {
+  // Normalize forMembers — accept both the new array form and the legacy
+  // singular `forMember` string, so an in-flight Gemini caching weirdness
+  // doesn't break the bot.
+  const rawTargets = (() => {
+    if (Array.isArray(payload?.forMembers)) return payload.forMembers;
+    if (payload?.forMember) return [payload.forMember];
+    return [];
+  })();
+
+  const resolutions = [];
+  for (const name of rawTargets) {
+    const r = await resolveEntity({ familyId: sender.familyId, sender, name });
+    if (r.kind === 'unknown') {
       return {
-        replyText: `לא הצלחתי לזהות את "${resolved.input}" בבני המשפחה או בחיות. נסה/י שם אחר.`,
+        replyText: `לא הצלחתי לזהות את "${r.input}" בבני המשפחה או בחיות. נסה/י שם אחר.`,
       };
     }
-    if (resolved.kind === 'ambiguous') {
-      const labels = (resolved.candidates || [])
+    if (r.kind === 'ambiguous') {
+      const labels = (r.candidates || [])
         .map((c) => `${c.kind === 'pet' ? 'חיית מחמד' : 'בן/ת משפחה'} בשם ${c.displayName}`)
         .join(' או ');
-      return {
-        replyText: `התכוונת ל${labels}? נסה/י לציין בבירור.`,
-      };
+      return { replyText: `התכוונת ל${labels}? נסה/י לציין בבירור.` };
     }
+    resolutions.push(r);
   }
 
   const allEvents = await fetchEvents({ familyId: sender.familyId, start, end });
 
-  // ── Pet path ────────────────────────────────────────────────────────────
-  if (resolved && resolved.kind === 'pet') {
-    const petId = resolved.id;
-    const eventsForPet = allEvents.filter(
-      (e) => Array.isArray(e.petIds) && e.petIds.includes(petId)
-    );
-
-    const [vaccs, visits] = await Promise.all([
-      fetchVaccinationsForPet({ familyId: sender.familyId, petId, start, end }),
-      fetchVetVisitsForPet({ familyId: sender.familyId, petId, start, end }),
-    ]);
-
-    // Build a unified, time-sorted line list.
-    const items = [];
-    for (const e of eventsForPet) {
-      const ts = e.startTime?.toDate?.();
-      if (!ts) continue;
-      items.push({ at: ts, label: e.title || 'אירוע' });
-    }
-    for (const v of vaccs) {
-      const ts = v.nextDueAt?.toDate?.();
-      if (!ts) continue;
-      items.push({ at: ts, label: `חיסון: ${v.type || ''}`.trim() });
-    }
-    for (const v of visits) {
-      const ts = v.visitedAt?.toDate?.();
-      if (!ts) continue;
-      items.push({ at: ts, label: `וטרינר: ${v.reason || ''}`.trim() });
-    }
-    items.sort((a, b) => a.at.getTime() - b.at.getTime());
-
-    const lines = items.map((it) => {
-      const local = dayjs(it.at).tz(FAMILY_TZ);
-      return `${formatPrefix(local, window)} ${it.label}`;
-    });
-    return { replyText: scheduleReply(window, lines) };
+  // Partition resolved targets into member ids and pet ids.
+  const memberIds = new Set();
+  const petIds = new Set();
+  for (const r of resolutions) {
+    if (r.kind === 'self' || r.kind === 'member') memberIds.add(r.id);
+    else if (r.kind === 'pet') petIds.add(r.id);
   }
-
-  // ── Member-filter / unfiltered path ─────────────────────────────────────
-  const filterMemberId =
-    resolved && (resolved.kind === 'self' || resolved.kind === 'member')
-      ? resolved.id
-      : null;
   const strict = payload?.strict === true;
 
-  const lines = [];
-  for (const e of allEvents) {
-    if (filterMemberId) {
-      const attendees = Array.isArray(e.attendeeMemberIds) ? e.attendeeMemberIds : [];
-      if (strict) {
-        // "רק לי" / "רק <name>" — only events where target is the SOLE attendee.
-        if (attendees.length !== 1 || attendees[0] !== filterMemberId) continue;
-      } else {
-        // Default "מה יש לי" / "מה יש למזל" — include events where target
-        // appears in attendees, plus untagged events (visible to the whole
-        // family). Exclude events tagged exclusively to other people.
-        const targetTagged = attendees.includes(filterMemberId);
-        const untagged = attendees.length === 0;
-        if (!targetTagged && !untagged) continue;
+  // ── Pet-only path: when the user asked exclusively about pet(s),
+  //    augment with vaccinations + vet visits inside the window.
+  const petOnly = memberIds.size === 0 && petIds.size > 0;
+  let petExtras = [];
+  if (petOnly) {
+    const fetched = await Promise.all(
+      [...petIds].map(async (pid) => {
+        const [vaccs, visits] = await Promise.all([
+          fetchVaccinationsForPet({ familyId: sender.familyId, petId: pid, start, end }),
+          fetchVetVisitsForPet({ familyId: sender.familyId, petId: pid, start, end }),
+        ]);
+        return { vaccs, visits };
+      })
+    );
+    petExtras = fetched.flatMap(({ vaccs, visits }) => {
+      const xs = [];
+      for (const v of vaccs) {
+        const ts = v.nextDueAt?.toDate?.();
+        if (ts) xs.push({ at: ts, label: `חיסון: ${v.type || ''}`.trim() });
       }
-    }
-    const startTs = e.startTime?.toDate?.();
-    if (!startTs) continue;
-    const local = dayjs(startTs).tz(FAMILY_TZ);
-    lines.push(`${formatPrefix(local, window)} ${e.title}`);
+      for (const v of visits) {
+        const ts = v.visitedAt?.toDate?.();
+        if (ts) xs.push({ at: ts, label: `וטרינר: ${v.reason || ''}`.trim() });
+      }
+      return xs;
+    });
   }
+
+  // Decide which events to include.
+  function eventMatches(e) {
+    // No filter at all → include everything (legacy behaviour).
+    if (memberIds.size === 0 && petIds.size === 0) return true;
+
+    const attendees = Array.isArray(e.attendeeMemberIds) ? e.attendeeMemberIds : [];
+    const eventPetIds = Array.isArray(e.petIds) ? e.petIds : [];
+
+    // Pet hit: the event tags any pet target.
+    const petHit = [...petIds].some((pid) => eventPetIds.includes(pid));
+
+    if (strict) {
+      // Sole-attendee semantics applied per individual member target —
+      // mostly used with one target ("רק לי"); for multi-target we still
+      // require the attendee set to be exactly one of the requested members.
+      const memberHit =
+        attendees.length === 1 && memberIds.has(attendees[0]);
+      return memberHit || petHit;
+    }
+
+    // Soft semantics: any target in attendees, OR untagged event (when at
+    // least one member target is in scope — "shared family events"
+    // shouldn't piggy-back on a pet-only query).
+    const memberHit = [...memberIds].some((mid) => attendees.includes(mid));
+    const untaggedAndMemberInScope =
+      memberIds.size > 0 && attendees.length === 0 && eventPetIds.length === 0;
+    return memberHit || petHit || untaggedAndMemberInScope;
+  }
+
+  const items = [];
+  for (const e of allEvents) {
+    if (!eventMatches(e)) continue;
+    const ts = e.startTime?.toDate?.();
+    if (!ts) continue;
+    items.push({ at: ts, label: e.title || 'אירוע' });
+  }
+  for (const x of petExtras) items.push(x);
+  items.sort((a, b) => a.at.getTime() - b.at.getTime());
+
+  const lines = items.map((it) => {
+    const local = dayjs(it.at).tz(FAMILY_TZ);
+    return `${formatPrefix(local, window)} ${it.label}`;
+  });
 
   return { replyText: scheduleReply(window, lines) };
 }
