@@ -652,18 +652,16 @@ async function handleIncomingMessage(msg) {
     pendingByPhone.delete(fromPhone);
   }
 
-  // Trigger-word gate: stay silent unless the bot was addressed by name
-  // or this sender is in an active "awake" window from a recent call.
+  // Trigger handling — but no longer a *gate*. The bot now lives on a
+  // dedicated number, so every incoming 1:1 message is intentional and
+  // gets processed. We still detect "ג'רוויס" so that:
+  //   - a bare call gets the friendly greeting
+  //   - an inline trigger ("ג'רוויס תוסיף פגישה") has the prefix stripped
+  //     before NLU, so Gemini sees the cleaner imperative.
   const trig = parseTrigger(rawText);
-  const awake = isAwake(fromPhone);
-  if (!trig.matched && !awake) {
-    console.log('[bot:silent] no trigger, not awake', { fromPhone });
-    return;
-  }
   let textToProcess = rawText;
   if (trig.matched) {
     if (trig.residual === '') {
-      // Bare call ("ג'רוויס" alone) — greet and arm the awake window.
       setAwake(fromPhone);
       await sock.sendMessage(remoteJid, { text: greetingFor(sender.displayName) });
       return;
