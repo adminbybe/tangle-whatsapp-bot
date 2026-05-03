@@ -98,7 +98,7 @@ function iconForEvent(event, membersById, petsById) {
   const eventPets = Array.isArray(event.petIds) ? event.petIds : [];
 
   // Multiple humans → family.
-  if (attendees.length > 1) return '👨‍👩‍👧‍👦';
+  if (attendees.length > 1) return '👪';
   // Pet-only event (no humans, but pet tagged) → pet icon.
   if (attendees.length === 0 && eventPets.length > 0) {
     return iconForPet(petsById.get(eventPets[0]));
@@ -108,7 +108,7 @@ function iconForEvent(event, membersById, petsById) {
     return iconForMember(membersById.get(attendees[0]));
   }
   // Untagged → family.
-  return '👨‍👩‍👧‍👦';
+  return '👪';
 }
 
 // ── Firestore fetchers ────────────────────────────────────────────────────
