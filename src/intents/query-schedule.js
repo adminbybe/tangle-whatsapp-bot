@@ -93,22 +93,29 @@ function iconForPet(pet) {
   return '🐾';
 }
 
-function iconForEvent(event, membersById, petsById) {
+// Compose the icon prefix from each tagged attendee — one icon per person
+// per pet, in attendee order. So an event with Jordan+Mazal renders 👨👩,
+// a vet visit on the dog renders 🐕, an untagged "family-wide" event
+// renders the concatenation of every family member + every pet (👨👩🐕).
+// Capped at 6 icons so an event with a huge guest list doesn't overflow
+// a phone-sized screen.
+function iconForEvent(event, membersById, petsById, allMembers, allPets) {
   const attendees = Array.isArray(event.attendeeMemberIds) ? event.attendeeMemberIds : [];
   const eventPets = Array.isArray(event.petIds) ? event.petIds : [];
 
-  // Multiple humans → family.
-  if (attendees.length > 1) return '🏠';
-  // Pet-only event (no humans, but pet tagged) → pet icon.
-  if (attendees.length === 0 && eventPets.length > 0) {
-    return iconForPet(petsById.get(eventPets[0]));
+  if (attendees.length === 0 && eventPets.length === 0) {
+    // Truly untagged → represent the whole family.
+    const memberIcons = allMembers.map((m) => iconForMember(m));
+    const petIcons = allPets.map((p) => iconForPet(p));
+    const composite = [...memberIcons, ...petIcons].slice(0, 6).join('');
+    return composite || '🏠';
   }
-  // Single human → that person.
-  if (attendees.length === 1) {
-    return iconForMember(membersById.get(attendees[0]));
-  }
-  // Untagged → family.
-  return '🏠';
+
+  const icons = [];
+  for (const id of attendees) icons.push(iconForMember(membersById.get(id)));
+  for (const id of eventPets) icons.push(iconForPet(petsById.get(id)));
+  const composite = icons.slice(0, 6).join('');
+  return composite || '🏠';
 }
 
 // ── Firestore fetchers ────────────────────────────────────────────────────
@@ -288,6 +295,20 @@ export async function querySchedule({ sender, payload }) {
   }
 
   // Build a unified, time-sorted list of items with icons.
+  // Stable orderings for the "untagged" composite icon: family creator
+  // first (createdAt asc), pets in name order. Falls back to map order
+  // if timestamps are missing.
+  const allMembersOrdered = Array.from(membersById.values())
+    .filter((m) => !m.archivedAt)
+    .sort((a, b) => {
+      const ax = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+      const bx = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+      return ax - bx;
+    });
+  const allPetsOrdered = Array.from(petsById.values())
+    .filter((p) => !p.archivedAt)
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
   const items = [];
   for (const e of allEvents) {
     if (!eventMatches(e)) continue;
@@ -295,7 +316,7 @@ export async function querySchedule({ sender, payload }) {
     if (!ts) continue;
     items.push({
       at: ts,
-      icon: iconForEvent(e, membersById, petsById),
+      icon: iconForEvent(e, membersById, petsById, allMembersOrdered, allPetsOrdered),
       label: e.title || 'אירוע',
     });
   }
