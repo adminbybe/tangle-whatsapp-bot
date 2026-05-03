@@ -62,6 +62,18 @@ JSON: {"intent":"query-schedule","confidence":0.97,"payload":{"window":"this-mon
 הודעה: "מה יש לי החודש הבא?"
 JSON: {"intent":"query-schedule","confidence":0.95,"payload":{"window":"next-month"}}
 
+הודעה: "מה יש רק לי החודש?"
+JSON: {"intent":"query-schedule","confidence":0.94,"payload":{"window":"this-month","forMember":"self"}}
+
+הודעה: "מה יש לי לבד השבוע?"
+JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-week","forMember":"self"}}
+
+הודעה: "מה יש למזל החודש?"
+JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-month","forMember":"מזל"}}
+
+הודעה: "מה יש לאשתי השבוע?"
+JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"this-week","forMember":"אשתי"}}
+
 הודעה: "מתי הטסט של מזל נגמר?"
 JSON: {"intent":"query-file-expiry","confidence":0.95,"payload":{"searchQuery":"טסט מזל"}}
 

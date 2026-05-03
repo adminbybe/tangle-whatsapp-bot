@@ -33,6 +33,9 @@ export const NLU_RESPONSE_SCHEMA = {
         'omit startTime entirely (do NOT guess) and lower confidence. ' +
         'For intent="mark-task-done": REQUIRED taskTitle, REQUIRED forDate (YYYY-MM-DD). ' +
         'For intent="query-schedule": REQUIRED window (today|tomorrow|this-week|next-week|this-month|next-month). ' +
+        'OPTIONAL forMember — set when the user wants events of a specific ' +
+        'person ("רק לי", "של מזל", "של אשתי"). Use "self" for the speaker, ' +
+        'or the person\'s Hebrew name / nickname / relational term. ' +
         'For intent="query-file-expiry": REQUIRED searchQuery — the meaningful ' +
         'Hebrew keywords from the question (e.g. user says "מתי הטסט של מזל ' +
         'נגמר?" → searchQuery="טסט מזל"). Strip stop-words like של/את/מתי. ' +
@@ -81,6 +84,16 @@ export const NLU_RESPONSE_SCHEMA = {
           enum: ['today', 'tomorrow', 'this-week', 'next-week', 'this-month', 'next-month'],
           description: 'query-schedule ONLY: which time window the user asked about.',
         },
+        forMember: {
+          type: 'string',
+          description:
+            'query-schedule ONLY (optional): filter the schedule to events ' +
+            'tagged with a specific family member. Use "self" if the user said ' +
+            '"רק לי" / "מה יש לי לבד". Otherwise put the name as the user said ' +
+            'it ("מזל", "אלם") or the relational term ("אשתי", "בעלי", "הבן", ' +
+            '"הבת", "אבא", "אמא"). Omit when the user wants the full family ' +
+            'schedule.',
+        },
         searchQuery: {
           type: 'string',
           description:
@@ -101,6 +114,7 @@ export const NLU_RESPONSE_SCHEMA = {
         'taskTitle',
         'forDate',
         'window',
+        'forMember',
         'searchQuery',
       ],
     },
