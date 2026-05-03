@@ -373,6 +373,28 @@ async function executeIntent({ sender, intent, confidence, payload, rawText, fro
   return { replyText: unknownIntentReply() };
 }
 
+// Static LID → E.164 phone mapping pulled from the BOT_LID_MAPPING env
+// var. Format: `lidNumber=+E164,otherLid=+E164` (the @lid suffix is
+// optional). Used as a last-resort fallback when Baileys doesn't expose
+// the underlying phone for a privacy-formatted JID — the operator adds
+// the family's known LIDs once and the bot routes every future message
+// from those LIDs to the right family member.
+const STATIC_LID_MAP = (() => {
+  const raw = process.env.BOT_LID_MAPPING;
+  const map = new Map();
+  if (!raw) return map;
+  for (const entry of raw.split(',')) {
+    const [lidPart, phonePart] = entry.split('=').map((s) => s?.trim());
+    if (!lidPart || !phonePart) continue;
+    const lidDigits = lidPart.replace(/@lid$/, '').replace(/\D/g, '');
+    if (!lidDigits) continue;
+    const lidJid = `${lidDigits}@lid`;
+    map.set(lidJid, phonePart.startsWith('+') ? phonePart : `+${phonePart.replace(/\D/g, '')}`);
+  }
+  if (map.size) console.log(`[lid-map] loaded ${map.size} static mapping(s)`);
+  return map;
+})();
+
 // Resolve a Baileys remoteJid to an E.164 phone, handling both classic
 // `@s.whatsapp.net` (PN-format) and `@lid` (privacy-preserving Local-ID
 // format used when the bot account isn't linked to the sender's account,
@@ -392,6 +414,13 @@ async function resolveJidToPhone(msg) {
   if (direct) return direct;
 
   if (!isLidJid(jid)) return null;
+
+  // 0) Static map (BOT_LID_MAPPING env var) — explicit operator-managed
+  //    mapping for known senders. Tried first because it's instant and
+  //    doesn't depend on Baileys version quirks.
+  if (STATIC_LID_MAP.has(jid)) {
+    return STATIC_LID_MAP.get(jid);
+  }
 
   // Diagnostic: dump every field on key + selected fields from msg, so we
   // can see which one Baileys is using to convey the underlying PN in this
