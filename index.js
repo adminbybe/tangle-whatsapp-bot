@@ -13,7 +13,7 @@ import express from 'express';
 import cors from 'cors';
 
 import { useFirebaseAuthState, clearAuthState } from './src/firebase-auth-state.js';
-import { extractE164FromJid } from './src/phone.js';
+import { extractE164FromJid, isLidJid } from './src/phone.js';
 import { resolveSender } from './src/sender-resolver.js';
 import { parseMessage } from './src/nlu/gemini.js';
 import { todayIsoDate } from './src/dates.js';
@@ -373,12 +373,57 @@ async function executeIntent({ sender, intent, confidence, payload, rawText, fro
   return { replyText: unknownIntentReply() };
 }
 
+// Resolve a Baileys remoteJid to an E.164 phone, handling both classic
+// `@s.whatsapp.net` (PN-format) and `@lid` (privacy-preserving Local-ID
+// format used when the bot account isn't linked to the sender's account,
+// which is exactly our case after switching to a dedicated bot number).
+//
+// Strategy for @lid:
+//   1. Use the explicit `senderPn` field on msg.key if Baileys provides it
+//      (newer versions do).
+//   2. Fall back to `sock.onWhatsApp([jid])` which Baileys will resolve via
+//      its internal LID↔PN cache once available.
+async function resolveJidToPhone(msg) {
+  const key = msg?.key || {};
+  const jid = key.remoteJid;
+  if (!jid) return null;
+
+  const direct = extractE164FromJid(jid);
+  if (direct) return direct;
+
+  if (!isLidJid(jid)) return null;
+
+  // 1) senderPn — set by Baileys when it knows the underlying phone.
+  const senderPn = key.senderPn || msg?.participantPn || null;
+  if (senderPn) {
+    const fromPn = extractE164FromJid(senderPn);
+    if (fromPn) return fromPn;
+  }
+
+  // 2) onWhatsApp lookup — resolves LID via Baileys' cache.
+  try {
+    if (sock?.onWhatsApp) {
+      const results = await sock.onWhatsApp(jid);
+      const hit = Array.isArray(results) ? results[0] : null;
+      if (hit?.jid) {
+        const fromHit = extractE164FromJid(hit.jid);
+        if (fromHit) return fromHit;
+      }
+    }
+  } catch (err) {
+    console.warn('[lid-resolve] onWhatsApp failed:', err.message);
+  }
+
+  return null;
+}
+
 async function handleIncomingMessage(msg) {
   if (!msg) return;
   const remoteJid = msg.key?.remoteJid;
   const fromMe = msg.key?.fromMe;
   const ownJidRaw = sock?.user?.id;
-  console.log('[bot:incoming]', JSON.stringify({ remoteJid, fromMe, ownJidRaw, hasMsg: !!msg.message }));
+  const senderPnHint = msg.key?.senderPn || null;
+  console.log('[bot:incoming]', JSON.stringify({ remoteJid, fromMe, ownJidRaw, senderPnHint, hasMsg: !!msg.message }));
 
   if (!remoteJid || remoteJid.endsWith('@g.us')) {
     console.log('[bot:skip] no remoteJid or group');
@@ -410,8 +455,11 @@ async function handleIncomingMessage(msg) {
   ).trim();
   if (!rawText) return;
 
-  const fromPhone = extractE164FromJid(remoteJid);
-  if (!fromPhone) return;
+  const fromPhone = await resolveJidToPhone(msg);
+  if (!fromPhone) {
+    console.log('[bot:skip] could not resolve sender phone', { remoteJid });
+    return;
+  }
 
   let sender = null;
   try {

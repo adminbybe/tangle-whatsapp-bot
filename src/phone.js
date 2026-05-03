@@ -24,8 +24,12 @@ export function normalizePhone(raw) {
 
 /**
  * Extract an E.164 phone number from a Baileys JID.
- * Baileys 1:1 JIDs look like `972541234567@s.whatsapp.net`.
+ * 1:1 PN-format JIDs look like `972541234567@s.whatsapp.net`.
  * Group JIDs end with `@g.us` — we return null so the caller can skip them.
+ * `@lid` JIDs (Local-ID, WhatsApp's privacy-preserving form when the bot
+ * isn't linked to the user's account) don't carry a phone number directly —
+ * the caller must look it up via `senderPn` or sock.onWhatsApp before
+ * resolving. We return null here so the caller knows to take that path.
  *
  * @param {string | null | undefined} jid
  * @returns {string | null}
@@ -37,4 +41,15 @@ export function extractE164FromJid(jid) {
   const digits = jid.split('@')[0]?.replace(/\D/g, '') || '';
   if (!digits) return null;
   return '+' + digits;
+}
+
+/**
+ * True if the JID is in the Local-ID privacy format. These don't carry a
+ * phone number directly; resolve via senderPn or onWhatsApp before use.
+ *
+ * @param {string | null | undefined} jid
+ * @returns {boolean}
+ */
+export function isLidJid(jid) {
+  return typeof jid === 'string' && jid.endsWith('@lid');
 }
