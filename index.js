@@ -393,14 +393,50 @@ async function resolveJidToPhone(msg) {
 
   if (!isLidJid(jid)) return null;
 
-  // 1) senderPn — set by Baileys when it knows the underlying phone.
-  const senderPn = key.senderPn || msg?.participantPn || null;
-  if (senderPn) {
-    const fromPn = extractE164FromJid(senderPn);
-    if (fromPn) return fromPn;
+  // Diagnostic: dump every field on key + selected fields from msg, so we
+  // can see which one Baileys is using to convey the underlying PN in this
+  // particular release.
+  try {
+    console.log('[lid-resolve] key dump:', JSON.stringify(key));
+    console.log('[lid-resolve] msg fields:', JSON.stringify({
+      participant: msg?.participant,
+      participantPn: msg?.participantPn,
+      pushName: msg?.pushName,
+      broadcast: msg?.broadcast,
+      verifiedBizName: msg?.verifiedBizName,
+    }));
+  } catch (e) { /* noop */ }
+
+  // 1) senderPn / participantPn / participantAlt — names Baileys uses
+  //    across different releases for the underlying PN of an @lid sender.
+  const directHints = [
+    key.senderPn,
+    key.participantPn,
+    key.participantAlt,
+    msg?.participantPn,
+    msg?.senderPn,
+  ];
+  for (const hint of directHints) {
+    if (!hint) continue;
+    const resolved = extractE164FromJid(hint);
+    if (resolved) return resolved;
   }
 
-  // 2) onWhatsApp lookup — resolves LID via Baileys' cache.
+  // 2) Baileys 6.7+ exposes a LID → PN cache via signalRepository.
+  try {
+    const lidMap = sock?.signalRepository?.lidMapping;
+    if (lidMap?.getPNForLID) {
+      const pn = await lidMap.getPNForLID(jid);
+      if (pn) {
+        const resolved = extractE164FromJid(pn);
+        if (resolved) return resolved;
+      }
+    }
+  } catch (err) {
+    console.warn('[lid-resolve] lidMapping failed:', err.message);
+  }
+
+  // 3) onWhatsApp lookup — sometimes returns a PN-format jid for a LID input.
   try {
     if (sock?.onWhatsApp) {
       const results = await sock.onWhatsApp(jid);
