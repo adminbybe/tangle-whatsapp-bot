@@ -95,6 +95,30 @@ app.get('/qr-view', (req, res) => {
   );
 });
 
+// Operator-only LID lookup. Used to seed BOT_LID_MAPPING for a new family
+// member without requiring them to send a first message. Calls Baileys'
+// onWhatsApp() which sometimes — depending on Baileys version — surfaces
+// the per-pair @lid alongside the @s.whatsapp.net jid. Gated behind
+// ADMIN_SECRET so the URL alone isn't enough to enumerate phone numbers.
+app.get('/admin/lookup-lid', async (req, res) => {
+  const adminSecret = process.env.ADMIN_SECRET;
+  if (!adminSecret) {
+    return res.status(503).json({ error: 'admin endpoint disabled — set ADMIN_SECRET to enable' });
+  }
+  if (req.query.secret !== adminSecret) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const phone = String(req.query.phone || '').trim();
+  if (!phone) return res.status(400).json({ error: 'phone query param required' });
+  if (!sock || !isConnected) return res.status(503).json({ error: 'bot not connected' });
+  try {
+    const result = await sock.onWhatsApp(phone);
+    res.json({ phone, result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/logout', async (req, res) => {
   try {
     isConnected = false;
