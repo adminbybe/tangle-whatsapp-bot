@@ -41,6 +41,30 @@ export function unrecognizedSenderReply() {
   return 'מספר לא מזוהה. נא לבקש ממנהל/ת המשפחה להוסיף אותך כחבר/ת משפחה באפליקציה.';
 }
 
+// First-message onboarding for an unknown @lid sender. The user is told
+// exactly where to find their code in the app and what to send back.
+export function unknownLidOnboardingReply() {
+  return (
+    'שלום! אני לא מזהה אותך. כדי להתחבר, היכנס/י לאפליקציית Tangle → ב\'הגדרות\' מצא/י \'קוד WhatsApp\'. שלח/י לי את הקוד כאן.'
+  );
+}
+
+export function authCodeAcceptedReply() {
+  return 'מעולה, חיברתי אותך. עכשיו אפשר לדבר רגיל.';
+}
+
+export function authCodeExpiredReply() {
+  return 'הקוד הזה פג תוקף. צרי/צור קוד חדש באפליקציה ושלח/י שוב.';
+}
+
+export function authCodeUsedReply() {
+  return 'הקוד הזה כבר נוצל. צרי/צור קוד חדש באפליקציה.';
+}
+
+export function authCodeUnknownReply() {
+  return 'הקוד הזה לא מוכר. בדוק/י באפליקציה שהקוד עדיין מוצג ושלח/י שוב.';
+}
+
 export function unlinkedMemberReply() {
   return 'הנייד שלך מזוהה אך עדיין לא קושרת חשבון. כנסי לאפליקציה ותתקבלי הזמנה.';
 }

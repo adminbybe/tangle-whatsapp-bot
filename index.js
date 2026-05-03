@@ -14,7 +14,9 @@ import cors from 'cors';
 
 import { useFirebaseAuthState, clearAuthState } from './src/firebase-auth-state.js';
 import { extractE164FromJid, isLidJid } from './src/phone.js';
-import { resolveSender } from './src/sender-resolver.js';
+import { resolveSender, resolveSenderByMemberId } from './src/sender-resolver.js';
+import { lookupLidMapping } from './src/lid-mapping.js';
+import { extractAuthCode, claimAuthCode } from './src/whatsapp-auth-code.js';
 import { parseMessage } from './src/nlu/gemini.js';
 import { todayIsoDate } from './src/dates.js';
 import { addEvent, UnlinkedMemberError } from './src/intents/add-event.js';
@@ -34,6 +36,11 @@ import {
   taskCancelledReply,
   clarifyTimeReply,
   greetingFor,
+  unknownLidOnboardingReply,
+  authCodeAcceptedReply,
+  authCodeExpiredReply,
+  authCodeUsedReply,
+  authCodeUnknownReply,
 } from './src/reply-templates.js';
 import { dayjs, FAMILY_TZ } from './src/dates.js';
 
@@ -506,6 +513,96 @@ async function resolveJidToPhone(msg) {
   return null;
 }
 
+// Decide who's writing to the bot. Three possible outcomes:
+//   - { kind: 'sender', sender, fromPhone }  — proceed with normal handling.
+//   - { kind: 'reply-and-stop', reply }       — answer with this Hebrew reply
+//                                                and skip NLU. Used for the
+//                                                onboarding hint, code-claim
+//                                                feedback, and "unknown phone"
+//                                                reply.
+//   - { kind: 'skip', reason }                — ignore silently (group, no JID,
+//                                                no resolvable phone, etc.).
+//
+// `fromPhone` is used downstream as an in-process identity key (for the
+// pending-confirmation map, awake-window, undo-manager). For @lid senders
+// without a known phone we synthesize `lid:<jid>` so the key stays stable
+// across messages from the same user.
+async function resolveIncomingSender({ msg, rawText }) {
+  const remoteJid = msg?.key?.remoteJid;
+  if (!remoteJid) return { kind: 'skip', reason: 'no-jid' };
+
+  // Classic PN-format JID — phone is embedded, just look the member up.
+  if (!isLidJid(remoteJid)) {
+    const fromPhone = await resolveJidToPhone(msg);
+    if (!fromPhone) return { kind: 'skip', reason: 'phone-unresolved' };
+    let sender = null;
+    try {
+      sender = await resolveSender(fromPhone);
+    } catch (err) {
+      console.error('[bot] resolveSender failed:', err.message);
+    }
+    if (!sender) {
+      return { kind: 'reply-and-stop', reply: unrecognizedSenderReply() };
+    }
+    return { kind: 'sender', sender, fromPhone };
+  }
+
+  // ── @lid path ─────────────────────────────────────────────────────────
+  // 1. Static env override (BOT_LID_MAPPING) — admin escape hatch, wins
+  //    over everything else.
+  if (STATIC_LID_MAP.has(remoteJid)) {
+    const fromPhone = STATIC_LID_MAP.get(remoteJid);
+    const sender = await resolveSender(fromPhone);
+    if (sender) return { kind: 'sender', sender, fromPhone };
+  }
+
+  // 2. Self-service mapping written by the auth-code flow. Single Firestore
+  //    get, then an in-process cache hit on subsequent messages.
+  let mapping = null;
+  try {
+    mapping = await lookupLidMapping(remoteJid);
+  } catch (err) {
+    console.warn('[bot] lookupLidMapping failed:', err.message);
+  }
+  if (mapping) {
+    const sender = await resolveSenderByMemberId(mapping.memberId);
+    if (sender) {
+      const fromPhone = sender.phone || `lid:${remoteJid}`;
+      return { kind: 'sender', sender, fromPhone };
+    }
+  }
+
+  // 3. Last-chance Baileys hints (senderPn, signalRepository, onWhatsApp).
+  //    Useful for senders the bot has talked to before and where Baileys
+  //    cached a PN.
+  const legacyPhone = await resolveJidToPhone(msg);
+  if (legacyPhone) {
+    const sender = await resolveSender(legacyPhone);
+    if (sender) return { kind: 'sender', sender, fromPhone: legacyPhone };
+  }
+
+  // 4. First-message claim. The user typed "קוד NNNNNN" → bind their LID.
+  const code = extractAuthCode(rawText);
+  if (code) {
+    const result = await claimAuthCode({ lid: remoteJid, code });
+    if (result.ok) {
+      return { kind: 'reply-and-stop', reply: authCodeAcceptedReply() };
+    }
+    const reply =
+      result.errorKind === 'expired'
+        ? authCodeExpiredReply()
+        : result.errorKind === 'used'
+          ? authCodeUsedReply()
+          : result.errorKind === 'internal'
+            ? internalErrorReply()
+            : authCodeUnknownReply();
+    return { kind: 'reply-and-stop', reply };
+  }
+
+  // 5. Anything else from an unknown LID → onboarding hint.
+  return { kind: 'reply-and-stop', reply: unknownLidOnboardingReply() };
+}
+
 async function handleIncomingMessage(msg) {
   if (!msg) return;
   const remoteJid = msg.key?.remoteJid;
@@ -544,26 +641,17 @@ async function handleIncomingMessage(msg) {
   ).trim();
   if (!rawText) return;
 
-  const fromPhone = await resolveJidToPhone(msg);
-  if (!fromPhone) {
-    console.log('[bot:skip] could not resolve sender phone', { remoteJid });
+  const resolution = await resolveIncomingSender({ msg, rawText });
+  if (resolution.kind === 'skip') {
+    console.log('[bot:skip]', { reason: resolution.reason, remoteJid });
     return;
   }
-
-  let sender = null;
-  try {
-    sender = await resolveSender(fromPhone);
-  } catch (err) {
-    console.error('[bot] resolveSender failed:', err.message);
-  }
-
-  // Unknown sender
-  if (!sender) {
-    const reply = unrecognizedSenderReply();
-    console.warn('[bot] unknown sender message:', { fromPhone, rawText });
-    await sock.sendMessage(remoteJid, { text: reply });
+  if (resolution.kind === 'reply-and-stop') {
+    console.log('[bot:reply-and-stop]', { remoteJid });
+    await sock.sendMessage(remoteJid, { text: resolution.reply });
     return;
   }
+  const { sender, fromPhone } = resolution;
 
   // Cancel ("בטל")
   if (/^בטל\s*\.?$/.test(rawText)) {
