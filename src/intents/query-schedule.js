@@ -1,26 +1,13 @@
 // Intent handler: query-schedule (read-only).
 // Returns a Hebrew bullet list of events in the requested window.
-// Optionally filters to events tagged with a specific family member when
-// the user says "רק לי" / "של מזל" / "של אשתי".
+// Optional `forMember` filter narrows results to a specific person OR pet.
+// When the filter is a pet, vaccinations and vet visits in the same window
+// are merged in too — that's what the user expects from "מה יש לברי?".
 
 import { db, Timestamp } from '../firebase-admin.js';
 import { dayjs, FAMILY_TZ, nowInTz, parseIsoToTz } from '../dates.js';
 import { scheduleReply } from '../reply-templates.js';
-
-// Hebrew relational tokens used by the bot to figure out who "אשתי" /
-// "הבן" / etc map to. Mirrors the same set as query-file-expiry's
-// alias logic so phrasing stays consistent across the bot.
-const SPOUSE_TERMS = new Set([
-  'אשתי', 'בעלי', 'זוגתי', 'זוגי', 'בעל', 'אישה', 'אשתו', 'בעלה',
-  'הבעל', 'האישה', 'האשה',
-]);
-const CHILD_TERMS = new Set([
-  'בני', 'בתי', 'הבן', 'הבת', 'הילד', 'הילדה', 'בן', 'בת',
-]);
-const PARENT_TERMS = new Set([
-  'אבא', 'אמא', 'אבי', 'אמי', 'הורה', 'ההורים', 'הורי',
-]);
-const SELF_TERMS = new Set(['self', 'לי', 'אני', 'עצמי']);
+import { resolveEntity } from '../entity-resolver.js';
 
 const KNOWN_WINDOWS = new Set([
   'today',
@@ -39,10 +26,7 @@ function rangeFor(window) {
     return { start, end };
   }
   if (window === 'this-week') {
-    // Israeli week: Sun..Sat (Sat = dow 6 = last day). When today already IS
-    // Saturday the user almost certainly means "the upcoming week" rather than
-    // "just the rest of today" — extend to end of next Saturday in that case.
-    const dow = now.day(); // 0=Sun ... 6=Sat
+    const dow = now.day();
     if (dow === 6) {
       const end = now.add(7, 'day').endOf('day').add(1, 'millisecond');
       return { start: now, end };
@@ -53,91 +37,95 @@ function rangeFor(window) {
     return { start, end };
   }
   if (window === 'next-week') {
-    // From start of the upcoming Sunday through end of the following Saturday.
-    const dow = now.day(); // 0=Sun ... 6=Sat
+    const dow = now.day();
     const daysUntilNextSunday = ((7 - dow) % 7) || 7;
     const start = now.add(daysUntilNextSunday, 'day').startOf('day');
     const end = start.add(7, 'day');
     return { start, end };
   }
   if (window === 'this-month') {
-    // From now through end of the current calendar month (inclusive).
     const start = now;
     const end = now.endOf('month').add(1, 'millisecond');
     return { start, end };
   }
   if (window === 'next-month') {
-    // The full following calendar month.
     const start = now.add(1, 'month').startOf('month');
     const end = start.endOf('month').add(1, 'millisecond');
     return { start, end };
   }
-  // default 'today'
   const start = now.startOf('day');
   const end = start.add(1, 'day');
   return { start, end };
 }
 
-/**
- * Resolve the user's `forMember` filter (e.g. "self", "מזל", "אשתי") into
- * a concrete familyMember doc id, using the speaker's perspective for
- * relational terms.
- *
- * Returns:
- *   { kind: 'self' | 'member', memberId }   — filter to this member,
- *   { kind: 'unknown', input }               — name didn't match anyone,
- *   null                                     — no filter requested.
- */
-async function resolveForMember(sender, rawInput) {
-  if (!rawInput) return null;
-  const input = String(rawInput).trim().toLowerCase();
-  if (!input) return null;
-
-  if (SELF_TERMS.has(input)) {
-    return sender?.memberId
-      ? { kind: 'self', memberId: sender.memberId }
-      : null;
+function formatPrefix(local, window) {
+  if (window === 'this-month' || window === 'next-month') {
+    return local.locale('he').format('dddd D/M HH:mm');
   }
+  if (window === 'this-week' || window === 'next-week') {
+    return local.locale('he').format('dddd HH:mm');
+  }
+  return local.format('HH:mm');
+}
 
-  // Pull all family members once. Tiny dataset; no need to cache.
-  let allMembers = [];
+/**
+ * Pull every events doc in [start,end). Filtering by attendee/pet is done
+ * in-memory because Firestore's array-contains can't combine with the
+ * range query on startTime in a single index.
+ */
+async function fetchEvents({ familyId, start, end }) {
+  const snap = await db
+    .collection('events')
+    .where('familyId', '==', familyId)
+    .where('startTime', '>=', Timestamp.fromDate(start.toDate()))
+    .where('startTime', '<', Timestamp.fromDate(end.toDate()))
+    .orderBy('startTime', 'asc')
+    .get();
+  return snap.docs.map((d) => d.data()).filter((e) => !e.archivedAt);
+}
+
+async function fetchVaccinationsForPet({ familyId, petId, start, end }) {
   try {
     const snap = await db
-      .collection('familyMembers')
-      .where('familyId', '==', sender.familyId)
+      .collection('vaccinations')
+      .where('familyId', '==', familyId)
+      .where('petId', '==', petId)
       .get();
-    allMembers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const startMs = start.valueOf();
+    const endMs = end.valueOf();
+    return snap.docs
+      .map((d) => d.data())
+      .filter((v) => !v.archivedAt && v.nextDueAt?.toMillis)
+      .filter((v) => {
+        const ms = v.nextDueAt.toMillis();
+        return ms >= startMs && ms < endMs;
+      });
   } catch (err) {
-    console.error('[query-schedule] family members fetch failed:', err.message);
-    return { kind: 'unknown', input };
+    console.warn('[query-schedule] vaccinations fetch failed:', err.message);
+    return [];
   }
+}
 
-  // Direct name match (firstName or nickname, case-insensitive).
-  for (const m of allMembers) {
-    const names = [m.firstName, m.nickname]
-      .filter(Boolean)
-      .map((s) => String(s).trim().toLowerCase());
-    if (names.includes(input)) {
-      return { kind: 'member', memberId: m.id };
-    }
+async function fetchVetVisitsForPet({ familyId, petId, start, end }) {
+  try {
+    const snap = await db
+      .collection('vetVisits')
+      .where('familyId', '==', familyId)
+      .where('petId', '==', petId)
+      .get();
+    const startMs = start.valueOf();
+    const endMs = end.valueOf();
+    return snap.docs
+      .map((d) => d.data())
+      .filter((v) => !v.archivedAt && v.visitedAt?.toMillis)
+      .filter((v) => {
+        const ms = v.visitedAt.toMillis();
+        return ms >= startMs && ms < endMs;
+      });
+  } catch (err) {
+    console.warn('[query-schedule] vet visits fetch failed:', err.message);
+    return [];
   }
-
-  // Relational term resolution from the speaker's perspective.
-  const others = allMembers.filter((m) => m.id !== sender?.memberId);
-  if (SPOUSE_TERMS.has(input) && sender?.role === 'parent') {
-    const otherParent = others.find((m) => m.role === 'parent');
-    if (otherParent) return { kind: 'member', memberId: otherParent.id };
-  }
-  if (CHILD_TERMS.has(input)) {
-    const child = others.find((m) => m.role === 'child');
-    if (child) return { kind: 'member', memberId: child.id };
-  }
-  if (PARENT_TERMS.has(input) && sender?.role === 'child') {
-    const parent = others.find((m) => m.role === 'parent');
-    if (parent) return { kind: 'member', memberId: parent.id };
-  }
-
-  return { kind: 'unknown', input };
 }
 
 /**
@@ -152,50 +140,89 @@ export async function querySchedule({ sender, payload }) {
     : 'today';
   const { start, end } = rangeFor(window);
 
-  const filter = await resolveForMember(sender, payload?.forMember);
-  const filterMemberId = filter?.kind === 'self' || filter?.kind === 'member'
-    ? filter.memberId
-    : null;
-
-  const snap = await db
-    .collection('events')
-    .where('familyId', '==', sender.familyId)
-    .where('startTime', '>=', Timestamp.fromDate(start.toDate()))
-    .where('startTime', '<', Timestamp.fromDate(end.toDate()))
-    .orderBy('startTime', 'asc')
-    .get();
-
-  const lines = [];
-  for (const docSnap of snap.docs) {
-    const e = docSnap.data();
-    if (e.archivedAt) continue;
-    if (filterMemberId) {
-      const attendees = Array.isArray(e.attendeeMemberIds) ? e.attendeeMemberIds : [];
-      if (!attendees.includes(filterMemberId)) continue;
+  // Resolve the optional forMember filter into a member or a pet.
+  let resolved = null;
+  if (payload?.forMember) {
+    resolved = await resolveEntity({
+      familyId: sender.familyId,
+      sender,
+      name: payload.forMember,
+    });
+    if (resolved.kind === 'unknown') {
+      return {
+        replyText: `לא הצלחתי לזהות את "${resolved.input}" בבני המשפחה או בחיות. נסה/י שם אחר.`,
+      };
     }
-    const startTs = e.startTime?.toDate ? e.startTime.toDate() : null;
-    if (!startTs) continue;
-    const local = dayjs(startTs).tz(FAMILY_TZ);
-    let prefix;
-    if (window === 'this-month' || window === 'next-month') {
-      // Multi-day list spanning a month: include date so different occurrences
-      // of the same weekday don't blur together.
-      prefix = local.locale('he').format('dddd D/M HH:mm');
-    } else if (window === 'this-week' || window === 'next-week') {
-      // Multi-day list within a week: day name + time is enough.
-      prefix = local.locale('he').format('dddd HH:mm');
-    } else {
-      prefix = local.format('HH:mm');
+    if (resolved.kind === 'ambiguous') {
+      const labels = (resolved.candidates || [])
+        .map((c) => `${c.kind === 'pet' ? 'חיית מחמד' : 'בן/ת משפחה'} בשם ${c.displayName}`)
+        .join(' או ');
+      return {
+        replyText: `התכוונת ל${labels}? נסה/י לציין בבירור.`,
+      };
     }
-    lines.push(`${prefix} ${e.title}`);
   }
 
-  // If the user asked for a specific person but we couldn't resolve who,
-  // tell them rather than silently returning "no events".
-  if (filter?.kind === 'unknown') {
-    return {
-      replyText: `לא הצלחתי לזהות את "${filter.input}" בבני המשפחה. נסה/י שם אחר או נסח/י אחרת.`,
-    };
+  const allEvents = await fetchEvents({ familyId: sender.familyId, start, end });
+
+  // ── Pet path ────────────────────────────────────────────────────────────
+  if (resolved && resolved.kind === 'pet') {
+    const petId = resolved.id;
+    const eventsForPet = allEvents.filter(
+      (e) => Array.isArray(e.petIds) && e.petIds.includes(petId)
+    );
+
+    const [vaccs, visits] = await Promise.all([
+      fetchVaccinationsForPet({ familyId: sender.familyId, petId, start, end }),
+      fetchVetVisitsForPet({ familyId: sender.familyId, petId, start, end }),
+    ]);
+
+    // Build a unified, time-sorted line list.
+    const items = [];
+    for (const e of eventsForPet) {
+      const ts = e.startTime?.toDate?.();
+      if (!ts) continue;
+      items.push({ at: ts, label: e.title || 'אירוע' });
+    }
+    for (const v of vaccs) {
+      const ts = v.nextDueAt?.toDate?.();
+      if (!ts) continue;
+      items.push({ at: ts, label: `חיסון: ${v.type || ''}`.trim() });
+    }
+    for (const v of visits) {
+      const ts = v.visitedAt?.toDate?.();
+      if (!ts) continue;
+      items.push({ at: ts, label: `וטרינר: ${v.reason || ''}`.trim() });
+    }
+    items.sort((a, b) => a.at.getTime() - b.at.getTime());
+
+    const lines = items.map((it) => {
+      const local = dayjs(it.at).tz(FAMILY_TZ);
+      return `${formatPrefix(local, window)} ${it.label}`;
+    });
+    return { replyText: scheduleReply(window, lines) };
+  }
+
+  // ── Member-filter / unfiltered path ─────────────────────────────────────
+  const filterMemberId =
+    resolved && (resolved.kind === 'self' || resolved.kind === 'member')
+      ? resolved.id
+      : null;
+
+  const lines = [];
+  for (const e of allEvents) {
+    if (filterMemberId) {
+      const attendees = Array.isArray(e.attendeeMemberIds) ? e.attendeeMemberIds : [];
+      // "רק לי" / "רק <name>" semantics: include the event only when the
+      // target is the SOLE tagged attendee. Family-wide events (multiple
+      // attendees, or no attendees but isPrivate=false) are excluded so
+      // the user gets the focused list they asked for.
+      if (attendees.length !== 1 || attendees[0] !== filterMemberId) continue;
+    }
+    const startTs = e.startTime?.toDate?.();
+    if (!startTs) continue;
+    const local = dayjs(startTs).tz(FAMILY_TZ);
+    lines.push(`${formatPrefix(local, window)} ${e.title}`);
   }
 
   return { replyText: scheduleReply(window, lines) };

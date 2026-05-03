@@ -30,7 +30,19 @@ function buildFewShot(todayIsoDate) {
 דוגמאות (today=${todayIsoDate}, יום ${today.format('dddd')}):
 
 הודעה: "תוסיפי פגישה עם דני מחר ב-14:00 במשרד"
-JSON: {"intent":"add-event","confidence":0.97,"payload":{"title":"פגישה עם דני","startTime":"${isoTime(tomorrow, 14, 0)}","endTime":"${isoTime(tomorrow, 15, 0)}","location":"במשרד","attendees":["דני"],"category":"work"}}
+JSON: {"intent":"add-event","confidence":0.97,"payload":{"title":"פגישה עם דני","startTime":"${isoTime(tomorrow, 14, 0)}","endTime":"${isoTime(tomorrow, 15, 0)}","location":"משרד","attendees":["דני"],"category":"work"}}
+
+הודעה: "תקבע פגישה עם דני מחר ב-14:00 במלון דן תל אביב"
+JSON: {"intent":"add-event","confidence":0.97,"payload":{"title":"פגישה עם דני","startTime":"${isoTime(tomorrow, 14, 0)}","endTime":"${isoTime(tomorrow, 15, 0)}","location":"מלון דן תל אביב","attendees":["דני"],"category":"work"}}
+
+הודעה: "תקבע תור לרופא ביום ראשון 9 בבוקר ברחוב הרצל 12 תל אביב"
+JSON: {"intent":"add-event","confidence":0.94,"payload":{"title":"תור לרופא","startTime":"${isoTime(nextSunday, 9, 0)}","endTime":"${isoTime(nextSunday, 10, 0)}","location":"רחוב הרצל 12 תל אביב","attendees":[],"category":"medical"}}
+
+הודעה: "תקבע תור לוטרינר של ברי מחר ב-15:00 ברחוב ויצמן 8 הוד השרון"
+JSON: {"intent":"add-event","confidence":0.95,"payload":{"title":"וטרינר ברי","startTime":"${isoTime(tomorrow, 15, 0)}","endTime":"${isoTime(tomorrow, 16, 0)}","location":"רחוב ויצמן 8 הוד השרון","attendees":["ברי"],"category":"medical"}}
+
+הודעה: "תוסיף לי פגישת זום עם רותם מחר ב-10:00"
+JSON: {"intent":"add-event","confidence":0.95,"payload":{"title":"פגישת זום עם רותם","startTime":"${isoTime(tomorrow, 10, 0)}","endTime":"${isoTime(tomorrow, 11, 0)}","attendees":["רותם"],"category":"work"}}
 
 הודעה: "תוסיף לי פגישה עם דני מחר ב-15:00"
 JSON: {"intent":"add-event","confidence":0.97,"payload":{"title":"פגישה עם דני","startTime":"${isoTime(tomorrow, 15, 0)}","endTime":"${isoTime(tomorrow, 16, 0)}","location":null,"attendees":["דני"],"category":"work"}}
@@ -74,6 +86,12 @@ JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-mon
 הודעה: "מה יש לאשתי השבוע?"
 JSON: {"intent":"query-schedule","confidence":0.92,"payload":{"window":"this-week","forMember":"אשתי"}}
 
+הודעה: "מה יש לברי החודש?"
+JSON: {"intent":"query-schedule","confidence":0.93,"payload":{"window":"this-month","forMember":"ברי"}}
+
+הודעה: "מה יש לכלבה השבוע?"
+JSON: {"intent":"query-schedule","confidence":0.9,"payload":{"window":"this-week","forMember":"כלבה"}}
+
 הודעה: "מתי הטסט של מזל נגמר?"
 JSON: {"intent":"query-file-expiry","confidence":0.95,"payload":{"searchQuery":"טסט מזל"}}
 
@@ -109,7 +127,7 @@ function buildSystemPrompt(senderName, todayIsoDate) {
     'זהה את הכוונה ואת הביטחון שלך (0..1). השב רק JSON לפי הסכמה.',
     'כללים קריטיים:',
     '- payload חייב להכיל אך ורק שדות של ה-intent שזיהית. אסור לערבב שדות בין intents.',
-    '  • intent="add-event" → רק title, startTime, endTime, location, attendees, category. אסור window/taskTitle/forDate.',
+    '  • intent="add-event" → רק title, startTime, endTime, location, attendees, category. אסור window/taskTitle/forDate. attendees הוא מערך של שמות שהוזכרו במפורש (גם בני משפחה וגם חיות מחמד) — בלי להמציא.',
     '  • intent="mark-task-done" → רק taskTitle, forDate. אסור title/startTime/window.',
     '  • intent="query-schedule" → רק window. אסור title/startTime/taskTitle.',
     '  • intent="query-file-expiry" → רק searchQuery. אסור window/title/taskTitle. השתמש בכוונה הזו לשאלות "מתי X פג/נגמר/תקף", "כמה זמן יש לי על X", על מסמכים, רישיונות, ביטוחים, טסט רכב, תעודות חיסון, חוזים — כל קובץ עם תאריך תפוגה.',
@@ -124,6 +142,9 @@ function buildSystemPrompt(senderName, todayIsoDate) {
     '- אל תעתיק תאריכים מהדוגמאות. תמיד חשב מחדש לפי todayIsoDate שניתן בראש ההודעה.',
     '- forDate תמיד YYYY-MM-DD.',
     '- אל תמציא שמות אנשים שלא הוזכרו.',
+    '- חילוץ מיקום ב-add-event: אם ההודעה כוללת ביטוי מיקום ("ב-<מקום>", "ברחוב <שם> <מס>", "בכתובת <…>", "ב<עיר>", "אצל <מקום>"), העתק אותו לשדה location בלי מילת היחס המובילה (ב/אצל). אל תכלול את המיקום בתוך title — title צריך להיות נקי ("פגישה עם דני", לא "פגישה עם דני במלון דן"). אם אין מיקום בהודעה, השמט את location או החזר null.',
+    '- ב-add-event, attendees כולל את כל השמות הספציפיים שהמשתמש הזכיר (אנשים וחיות מחמד), בלי "אני"/"לי"/"שלי" ובלי שמות שהמשתמש לא ציין. דוגמה: "תקבע תור לוטרינר של ברי ברחוב ויצמן 8" → attendees=["ברי"], location="רחוב ויצמן 8". דוגמה: "תקבע פגישה עם דני" → attendees=["דני"]. דוגמה: "תוסיף פגישת זום מחר" → attendees=[].',
+    '- ב-add-event, category="medical" כשמדובר ברופא/וטרינר/חיסון/בדיקה רפואית. category="work" כשמדובר בפגישת עבודה. category="school" לבית ספר/גן. category="family" ברירת מחדל.',
     '- אם ההודעה לא מתאימה לאף כוונה החזר intent="unknown".',
     buildFewShot(todayIsoDate),
   ].join('\n');

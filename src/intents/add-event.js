@@ -10,6 +10,7 @@ import { db, FieldValue, Timestamp } from '../firebase-admin.js';
 import { dayjs, FAMILY_TZ, parseIsoToTz } from '../dates.js';
 import { newUndoToken } from '../undo.js';
 import { eventAddedReply, clarifyTimeReply, unknownIntentReply } from '../reply-templates.js';
+import { resolveEntities } from '../entity-resolver.js';
 
 const VALID_CATEGORIES = ['work', 'personal', 'school', 'family', 'medical', 'other'];
 
@@ -90,6 +91,43 @@ export async function addEvent({ sender, payload }) {
 
   const location = payload.location ? String(payload.location).trim() || null : null;
 
+  // Resolve every name the NLU pulled from the message (attendees + an
+  // optional dedicated `pets` list for clarity) into Tangle entities.
+  // The speaker is always tagged in attendeeMemberIds — that's what makes
+  // "מה יש רק לי?" work later. Mentioned family members go in too;
+  // mentioned pets go into petIds.
+  const attendeeMemberIds = sender.memberId ? [sender.memberId] : [];
+  const petIds = [];
+  const namesFromPayload = [
+    ...(Array.isArray(payload.attendees) ? payload.attendees : []),
+    ...(Array.isArray(payload.pets) ? payload.pets : []),
+  ].map((s) => String(s || '').trim()).filter(Boolean);
+
+  if (namesFromPayload.length) {
+    try {
+      const resolutions = await resolveEntities({
+        familyId: sender.familyId,
+        sender,
+        names: namesFromPayload,
+      });
+      for (const r of resolutions) {
+        if (r.kind === 'member' && r.id && !attendeeMemberIds.includes(r.id)) {
+          attendeeMemberIds.push(r.id);
+        } else if (r.kind === 'self' && r.id && !attendeeMemberIds.includes(r.id)) {
+          attendeeMemberIds.push(r.id);
+        } else if (r.kind === 'pet' && r.id && !petIds.includes(r.id)) {
+          petIds.push(r.id);
+        }
+        // 'unknown' / 'ambiguous' → skip silently. The event still gets
+        // created with whatever we did resolve, and the user can edit
+        // attendees in the app afterwards.
+      }
+    } catch (err) {
+      console.warn('[add-event] entity resolution failed:', err.message);
+      // Non-fatal: keep the event with sender as the only attendee.
+    }
+  }
+
   const docPayload = {
     familyId: sender.familyId,
     title,
@@ -98,7 +136,9 @@ export async function addEvent({ sender, payload }) {
     endTime: Timestamp.fromDate(endD.toDate()),
     isAllDay: false,
     location,
-    attendeeMemberIds: [], // v1 does not resolve named attendees
+    attendeeMemberIds,
+    petIds,
+    isPrivate: false,
     category,
     recurrence: 'none',
     recurrenceUntil: null,
