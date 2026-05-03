@@ -131,6 +131,30 @@ JSON: {"intent":"query-file-expiry","confidence":0.95,"payload":{"searchQuery":"
 הודעה: "מתי פג הדרכון של הילד?"
 JSON: {"intent":"query-file-expiry","confidence":0.93,"payload":{"searchQuery":"דרכון הילד"}}
 
+הודעה: "מי הווטרינר של ברי?"
+JSON: {"intent":"query-pet-info","confidence":0.95,"payload":{"petName":"ברי","aspect":"vet"}}
+
+הודעה: "מה הטלפון של הווטרינר של ברי?"
+JSON: {"intent":"query-pet-info","confidence":0.94,"payload":{"petName":"ברי","aspect":"vet"}}
+
+הודעה: "איזה אוכל אנחנו נותנים לברי?"
+JSON: {"intent":"query-pet-info","confidence":0.93,"payload":{"petName":"ברי","aspect":"food"}}
+
+הודעה: "כמה אוכל נשאר לברי?"
+JSON: {"intent":"query-pet-info","confidence":0.92,"payload":{"petName":"ברי","aspect":"food"}}
+
+הודעה: "אילו תרופות ברי לוקחת?"
+JSON: {"intent":"query-pet-info","confidence":0.93,"payload":{"petName":"ברי","aspect":"medication"}}
+
+הודעה: "מה הרגישויות של ברי?"
+JSON: {"intent":"query-pet-info","confidence":0.92,"payload":{"petName":"ברי","aspect":"condition"}}
+
+הודעה: "כמה ברי שוקלת?"
+JSON: {"intent":"query-pet-info","confidence":0.92,"payload":{"petName":"ברי","aspect":"weight"}}
+
+הודעה: "תקבע ארוחה משפחתית מחר ב-19:00"
+JSON: {"intent":"add-event","confidence":0.95,"payload":{"title":"ארוחה משפחתית","startTime":"${isoTime(tomorrow, 19, 0)}","endTime":"${isoTime(tomorrow, 20, 0)}","attendees":[],"category":"family"}}
+
 הודעה: "אהלן מה קורה"
 JSON: {"intent":"unknown","confidence":0.1,"payload":{}}
 `;
@@ -146,6 +170,7 @@ function buildSystemPrompt(senderName, todayIsoDate) {
     '  • intent="mark-task-done" → רק taskTitle, forDate. אסור title/startTime/window.',
     '  • intent="query-schedule" → רק window. אסור title/startTime/taskTitle.',
     '  • intent="query-file-expiry" → רק searchQuery. אסור window/title/taskTitle. השתמש בכוונה הזו לשאלות "מתי X פג/נגמר/תקף", "כמה זמן יש לי על X", על מסמכים, רישיונות, ביטוחים, טסט רכב, תעודות חיסון, חוזים — כל קובץ עם תאריך תפוגה.',
+    '  • intent="query-pet-info" → רק petName ו-aspect. השתמש בכוונה הזו לשאלות מיידיות על חיית מחמד שלא קשורות ללוח זמנים: וטרינר/טלפון של הוטרינר ("מי הווטרינר של ברי", "מה הטלפון של הווטרינר") → aspect="vet". מזון/אוכל/חתלית/מצרכים ("מה האוכל של ברי", "כמה אוכל נשאר") → aspect="food". תרופות פעילות → aspect="medication". רגישויות / מצבים רפואיים → aspect="condition". משקל אחרון → aspect="weight".',
     '  • intent="unknown" → payload ריק {}.',
     '- ל-add-event: title ו-startTime הם שדות חובה. אם המשתמש לא ציין שעה ברורה — השמט לגמרי את startTime (אל תמציא!), והורד את הביטחון מתחת ל-0.9.',
     '- כל ערכי startTime/endTime חייבים להיות ISO 8601 עם offset +03:00 או +02:00 לפי השעון בישראל.',
@@ -160,6 +185,7 @@ function buildSystemPrompt(senderName, todayIsoDate) {
     '- אל תמציא שמות אנשים שלא הוזכרו.',
     '- חילוץ מיקום ב-add-event: אם ההודעה כוללת ביטוי מיקום ("ב-<מקום>", "ברחוב <שם> <מס>", "בכתובת <…>", "ב<עיר>", "אצל <מקום>"), העתק אותו לשדה location בלי מילת היחס המובילה (ב/אצל). אל תכלול את המיקום בתוך title — title צריך להיות נקי ("פגישה עם דני", לא "פגישה עם דני במלון דן"). אם אין מיקום בהודעה, השמט את location או החזר null.',
     '- ב-add-event, attendees כולל את כל השמות הספציפיים שהמשתמש הזכיר (אנשים וחיות מחמד), בלי "אני"/"לי"/"שלי" ובלי שמות שהמשתמש לא ציין. דוגמה: "תקבע תור לוטרינר של ברי ברחוב ויצמן 8" → attendees=["ברי"], location="רחוב ויצמן 8". דוגמה: "תקבע פגישה עם דני" → attendees=["דני"]. דוגמה: "תוסיף פגישת זום מחר" → attendees=[].',
+    '- ב-add-event, אם המשתמש אמר "אירוע משפחתי", "ארוחה משפחתית", "טיול משפחתי", "לכל המשפחה" — השאר attendees ריק ([]). אירוע ללא תיוג ספציפי = אירוע משפחתי, גלוי לכולם.',
     '- ב-add-event, category="medical" כשמדובר ברופא/וטרינר/חיסון/בדיקה רפואית. category="work" כשמדובר בפגישת עבודה. category="school" לבית ספר/גן. category="family" ברירת מחדל.',
     '- אם ההודעה לא מתאימה לאף כוונה החזר intent="unknown".',
     buildFewShot(todayIsoDate),
@@ -250,7 +276,14 @@ export async function parseMessage(rawText, senderName, todayIsoDate) {
     ) {
       return unknownResult('schema-mismatch: ' + JSON.stringify(parsed).slice(0, 200));
     }
-    const allowed = ['add-event', 'mark-task-done', 'query-schedule', 'query-file-expiry', 'unknown'];
+    const allowed = [
+      'add-event',
+      'mark-task-done',
+      'query-schedule',
+      'query-file-expiry',
+      'query-pet-info',
+      'unknown',
+    ];
     if (!allowed.includes(parsed.intent)) {
       return unknownResult('bad-intent: ' + parsed.intent);
     }

@@ -10,13 +10,21 @@ export const NLU_RESPONSE_SCHEMA = {
   properties: {
     intent: {
       type: 'string',
-      enum: ['add-event', 'mark-task-done', 'query-schedule', 'query-file-expiry', 'unknown'],
+      enum: [
+        'add-event',
+        'mark-task-done',
+        'query-schedule',
+        'query-file-expiry',
+        'query-pet-info',
+        'unknown',
+      ],
       description:
-        'One of: add-event (user wants a new calendar event), mark-task-done ' +
-        '(user reports a task they completed), query-schedule (user asks what is ' +
-        'on their schedule), query-file-expiry (user asks when a document, ' +
-        'license, vehicle test, vaccination certificate, or any time-bound file ' +
-        'expires), unknown (anything else, including chit-chat).',
+        'One of: add-event (new calendar event), mark-task-done ' +
+        '(user reports a task they completed), query-schedule (what is ' +
+        'on the schedule), query-file-expiry (when a document/license/' +
+        'insurance/test expires), query-pet-info (free-form facts about a ' +
+        'pet — vet contact, food/supplies, medications, conditions, ' +
+        'weight), unknown (anything else, including chit-chat).',
     },
     confidence: {
       type: 'number',
@@ -39,6 +47,8 @@ export const NLU_RESPONSE_SCHEMA = {
         'For intent="query-file-expiry": REQUIRED searchQuery — the meaningful ' +
         'Hebrew keywords from the question (e.g. user says "מתי הטסט של מזל ' +
         'נגמר?" → searchQuery="טסט מזל"). Strip stop-words like של/את/מתי. ' +
+        'For intent="query-pet-info": REQUIRED petName + aspect. aspect is ' +
+        'one of vet/food/medication/condition/weight. ' +
         'For intent="unknown": empty object {}.',
       properties: {
         title: {
@@ -110,6 +120,21 @@ export const NLU_RESPONSE_SCHEMA = {
             'document/asset whose expiry the user is asking about (e.g. ' +
             '"טסט מזל", "ביטוח רכב", "רישיון", "ביטוח חיים"). Drop stop-words.',
         },
+        petName: {
+          type: 'string',
+          description:
+            'query-pet-info ONLY: pet name as the user said it (e.g. "ברי", ' +
+            '"כלבה"). The bot resolves it against the pets collection.',
+        },
+        aspect: {
+          type: 'string',
+          enum: ['vet', 'food', 'medication', 'condition', 'weight'],
+          description:
+            'query-pet-info ONLY: which aspect of the pet the user is asking ' +
+            'about. vet = vet name/phone, food = supplies (food/treats/litter), ' +
+            'medication = current medications, condition = allergies / ' +
+            'conditions, weight = latest weight entry.',
+        },
       },
       // propertyOrdering nudges Gemini to fill fields in this order, which keeps
       // intent-specific fields grouped and reduces cross-intent contamination.
@@ -126,6 +151,8 @@ export const NLU_RESPONSE_SCHEMA = {
         'forMembers',
         'strict',
         'searchQuery',
+        'petName',
+        'aspect',
       ],
     },
   },

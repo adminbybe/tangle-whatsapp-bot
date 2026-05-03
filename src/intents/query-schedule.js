@@ -1,11 +1,12 @@
 // Intent handler: query-schedule (read-only).
 // Returns a Hebrew bullet list of events in the requested window.
-// Optional `forMember` filter narrows results to a specific person OR pet.
-// When the filter is a pet, vaccinations and vet visits in the same window
-// are merged in too — that's what the user expects from "מה יש לברי?".
+// Optional `forMembers` filter narrows results to specific people / pets.
+// Pet care (vaccinations, vet visits) is merged into any human-targeted
+// or unfiltered query so a parent never misses a pet's appointment just
+// because it lives in a separate Firestore collection.
 
 import { db, Timestamp } from '../firebase-admin.js';
-import { dayjs, FAMILY_TZ, nowInTz, parseIsoToTz } from '../dates.js';
+import { dayjs, FAMILY_TZ, nowInTz } from '../dates.js';
 import { scheduleReply } from '../reply-templates.js';
 import { resolveEntity } from '../entity-resolver.js';
 
@@ -68,11 +69,49 @@ function formatPrefix(local, window) {
   return local.format('HH:mm');
 }
 
-/**
- * Pull every events doc in [start,end). Filtering by attendee/pet is done
- * in-memory because Firestore's array-contains can't combine with the
- * range query on startTime in a single index.
- */
+// ── Icons ─────────────────────────────────────────────────────────────────
+// Per-attendee icon at the start of each schedule line gives the user a
+// glance-able read of who an item belongs to. We prefer an explicit
+// gender / iconKey set on the member; otherwise fall back to a role-based
+// generic icon. Pets resolve by species.
+function iconForMember(member) {
+  if (!member) return '👤';
+  const g = String(member.gender || member.iconKey || '').toLowerCase();
+  if (g === 'male' || g === 'man' || g === 'm') return '👨';
+  if (g === 'female' || g === 'woman' || g === 'f' || g === 'w') return '👩';
+  if (g === 'boy') return '👦';
+  if (g === 'girl') return '👧';
+  if (member.role === 'child') return '🧒';
+  return '👤';
+}
+
+function iconForPet(pet) {
+  if (!pet) return '🐾';
+  const s = String(pet.species || '').toLowerCase();
+  if (s === 'cat') return '🐈';
+  if (s === 'dog') return '🐕';
+  return '🐾';
+}
+
+function iconForEvent(event, membersById, petsById) {
+  const attendees = Array.isArray(event.attendeeMemberIds) ? event.attendeeMemberIds : [];
+  const eventPets = Array.isArray(event.petIds) ? event.petIds : [];
+
+  // Multiple humans → family.
+  if (attendees.length > 1) return '👨‍👩‍👧‍👦';
+  // Pet-only event (no humans, but pet tagged) → pet icon.
+  if (attendees.length === 0 && eventPets.length > 0) {
+    return iconForPet(petsById.get(eventPets[0]));
+  }
+  // Single human → that person.
+  if (attendees.length === 1) {
+    return iconForMember(membersById.get(attendees[0]));
+  }
+  // Untagged → family.
+  return '👨‍👩‍👧‍👦';
+}
+
+// ── Firestore fetchers ────────────────────────────────────────────────────
 async function fetchEvents({ familyId, start, end }) {
   const snap = await db
     .collection('events')
@@ -84,12 +123,11 @@ async function fetchEvents({ familyId, start, end }) {
   return snap.docs.map((d) => d.data()).filter((e) => !e.archivedAt);
 }
 
-async function fetchVaccinationsForPet({ familyId, petId, start, end }) {
+async function fetchVaccinationsInWindow({ familyId, start, end, petIdsFilter }) {
   try {
     const snap = await db
       .collection('vaccinations')
       .where('familyId', '==', familyId)
-      .where('petId', '==', petId)
       .get();
     const startMs = start.valueOf();
     const endMs = end.valueOf();
@@ -97,6 +135,7 @@ async function fetchVaccinationsForPet({ familyId, petId, start, end }) {
       .map((d) => d.data())
       .filter((v) => !v.archivedAt && v.nextDueAt?.toMillis)
       .filter((v) => {
+        if (petIdsFilter && !petIdsFilter.has(v.petId)) return false;
         const ms = v.nextDueAt.toMillis();
         return ms >= startMs && ms < endMs;
       });
@@ -106,12 +145,11 @@ async function fetchVaccinationsForPet({ familyId, petId, start, end }) {
   }
 }
 
-async function fetchVetVisitsForPet({ familyId, petId, start, end }) {
+async function fetchVetVisitsInWindow({ familyId, start, end, petIdsFilter }) {
   try {
     const snap = await db
       .collection('vetVisits')
       .where('familyId', '==', familyId)
-      .where('petId', '==', petId)
       .get();
     const startMs = start.valueOf();
     const endMs = end.valueOf();
@@ -119,6 +157,7 @@ async function fetchVetVisitsForPet({ familyId, petId, start, end }) {
       .map((d) => d.data())
       .filter((v) => !v.archivedAt && v.visitedAt?.toMillis)
       .filter((v) => {
+        if (petIdsFilter && !petIdsFilter.has(v.petId)) return false;
         const ms = v.visitedAt.toMillis();
         return ms >= startMs && ms < endMs;
       });
@@ -128,10 +167,27 @@ async function fetchVetVisitsForPet({ familyId, petId, start, end }) {
   }
 }
 
+async function loadFamilyRosterMaps(familyId) {
+  try {
+    const [memberSnap, petSnap] = await Promise.all([
+      db.collection('familyMembers').where('familyId', '==', familyId).get(),
+      db.collection('pets').where('familyId', '==', familyId).get(),
+    ]);
+    const membersById = new Map();
+    memberSnap.docs.forEach((d) => membersById.set(d.id, { id: d.id, ...d.data() }));
+    const petsById = new Map();
+    petSnap.docs.forEach((d) => petsById.set(d.id, { id: d.id, ...d.data() }));
+    return { membersById, petsById };
+  } catch (err) {
+    console.warn('[query-schedule] roster load failed:', err.message);
+    return { membersById: new Map(), petsById: new Map() };
+  }
+}
+
 /**
  * @param {object} args
  * @param {{familyId: string, memberId?: string, role?: string}} args.sender
- * @param {object} args.payload   { window, forMember? }
+ * @param {object} args.payload   { window, forMembers?, strict? }
  * @returns {Promise<{replyText: string}>}
  */
 export async function querySchedule({ sender, payload }) {
@@ -140,9 +196,8 @@ export async function querySchedule({ sender, payload }) {
     : 'today';
   const { start, end } = rangeFor(window);
 
-  // Normalize forMembers — accept both the new array form and the legacy
-  // singular `forMember` string, so an in-flight Gemini caching weirdness
-  // doesn't break the bot.
+  // Accept both the array form (forMembers) and the legacy singular
+  // forMember string so a stale Gemini cached emission doesn't break us.
   const rawTargets = (() => {
     if (Array.isArray(payload?.forMembers)) return payload.forMembers;
     if (payload?.forMember) return [payload.forMember];
@@ -166,9 +221,6 @@ export async function querySchedule({ sender, payload }) {
     resolutions.push(r);
   }
 
-  const allEvents = await fetchEvents({ familyId: sender.familyId, start, end });
-
-  // Partition resolved targets into member ids and pet ids.
   const memberIds = new Set();
   const petIds = new Set();
   for (const r of resolutions) {
@@ -176,77 +228,106 @@ export async function querySchedule({ sender, payload }) {
     else if (r.kind === 'pet') petIds.add(r.id);
   }
   const strict = payload?.strict === true;
-
-  // ── Pet-only path: when the user asked exclusively about pet(s),
-  //    augment with vaccinations + vet visits inside the window.
+  const hasFilter = memberIds.size > 0 || petIds.size > 0;
+  const hasHumanTarget = memberIds.size > 0;
   const petOnly = memberIds.size === 0 && petIds.size > 0;
-  let petExtras = [];
+
+  // Load everything we need in parallel: events + roster + (when relevant)
+  // pet care collections.
+  const [allEvents, { membersById, petsById }] = await Promise.all([
+    fetchEvents({ familyId: sender.familyId, start, end }),
+    loadFamilyRosterMaps(sender.familyId),
+  ]);
+
+  // Decide pet care fetch scope:
+  //   - Pet-only query → only the requested pets.
+  //   - Human / unfiltered query → ALL family pets, so a parent's "מה יש לי?"
+  //     surfaces vaccinations and vet visits across every pet.
+  let vaccs = [];
+  let visits = [];
   if (petOnly) {
-    const fetched = await Promise.all(
-      [...petIds].map(async (pid) => {
-        const [vaccs, visits] = await Promise.all([
-          fetchVaccinationsForPet({ familyId: sender.familyId, petId: pid, start, end }),
-          fetchVetVisitsForPet({ familyId: sender.familyId, petId: pid, start, end }),
-        ]);
-        return { vaccs, visits };
-      })
-    );
-    petExtras = fetched.flatMap(({ vaccs, visits }) => {
-      const xs = [];
-      for (const v of vaccs) {
-        const ts = v.nextDueAt?.toDate?.();
-        if (ts) xs.push({ at: ts, label: `חיסון: ${v.type || ''}`.trim() });
-      }
-      for (const v of visits) {
-        const ts = v.visitedAt?.toDate?.();
-        if (ts) xs.push({ at: ts, label: `וטרינר: ${v.reason || ''}`.trim() });
-      }
-      return xs;
-    });
+    [vaccs, visits] = await Promise.all([
+      fetchVaccinationsInWindow({
+        familyId: sender.familyId,
+        start,
+        end,
+        petIdsFilter: petIds,
+      }),
+      fetchVetVisitsInWindow({
+        familyId: sender.familyId,
+        start,
+        end,
+        petIdsFilter: petIds,
+      }),
+    ]);
+  } else if (!hasFilter || hasHumanTarget) {
+    [vaccs, visits] = await Promise.all([
+      fetchVaccinationsInWindow({ familyId: sender.familyId, start, end }),
+      fetchVetVisitsInWindow({ familyId: sender.familyId, start, end }),
+    ]);
   }
 
-  // Decide which events to include.
+  // Decide which events to include in the result.
   function eventMatches(e) {
-    // No filter at all → include everything (legacy behaviour).
-    if (memberIds.size === 0 && petIds.size === 0) return true;
-
+    if (!hasFilter) return true;
     const attendees = Array.isArray(e.attendeeMemberIds) ? e.attendeeMemberIds : [];
     const eventPetIds = Array.isArray(e.petIds) ? e.petIds : [];
-
-    // Pet hit: the event tags any pet target.
     const petHit = [...petIds].some((pid) => eventPetIds.includes(pid));
 
     if (strict) {
-      // Sole-attendee semantics applied per individual member target —
-      // mostly used with one target ("רק לי"); for multi-target we still
-      // require the attendee set to be exactly one of the requested members.
-      const memberHit =
-        attendees.length === 1 && memberIds.has(attendees[0]);
+      const memberHit = attendees.length === 1 && memberIds.has(attendees[0]);
       return memberHit || petHit;
     }
-
-    // Soft semantics: any target in attendees, OR untagged event (when at
-    // least one member target is in scope — "shared family events"
-    // shouldn't piggy-back on a pet-only query).
     const memberHit = [...memberIds].some((mid) => attendees.includes(mid));
-    const untaggedAndMemberInScope =
-      memberIds.size > 0 && attendees.length === 0 && eventPetIds.length === 0;
-    return memberHit || petHit || untaggedAndMemberInScope;
+    // Family-wide events (no human attendees) and pet-only events count as
+    // "visible to anyone in the family", so a human-target query gets
+    // them too. We only suppress events tagged exclusively to other
+    // humans.
+    const noHumansTagged = memberIds.size > 0 && attendees.length === 0;
+    return memberHit || petHit || noHumansTagged;
   }
 
+  // Build a unified, time-sorted list of items with icons.
   const items = [];
   for (const e of allEvents) {
     if (!eventMatches(e)) continue;
     const ts = e.startTime?.toDate?.();
     if (!ts) continue;
-    items.push({ at: ts, label: e.title || 'אירוע' });
+    items.push({
+      at: ts,
+      icon: iconForEvent(e, membersById, petsById),
+      label: e.title || 'אירוע',
+    });
   }
-  for (const x of petExtras) items.push(x);
+  for (const v of vaccs) {
+    const ts = v.nextDueAt?.toDate?.();
+    if (!ts) continue;
+    const pet = petsById.get(v.petId);
+    items.push({
+      at: ts,
+      icon: iconForPet(pet),
+      label: pet
+        ? `חיסון ${pet.name}${v.type ? ` · ${v.type}` : ''}`
+        : `חיסון${v.type ? ' · ' + v.type : ''}`,
+    });
+  }
+  for (const v of visits) {
+    const ts = v.visitedAt?.toDate?.();
+    if (!ts) continue;
+    const pet = petsById.get(v.petId);
+    items.push({
+      at: ts,
+      icon: iconForPet(pet),
+      label: pet
+        ? `וטרינר ${pet.name}${v.reason ? ` · ${v.reason}` : ''}`
+        : `וטרינר${v.reason ? ' · ' + v.reason : ''}`,
+    });
+  }
   items.sort((a, b) => a.at.getTime() - b.at.getTime());
 
   const lines = items.map((it) => {
     const local = dayjs(it.at).tz(FAMILY_TZ);
-    return `${formatPrefix(local, window)} ${it.label}`;
+    return `${it.icon} ${formatPrefix(local, window)} ${it.label}`;
   });
 
   return { replyText: scheduleReply(window, lines) };
